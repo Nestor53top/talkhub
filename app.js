@@ -21,21 +21,41 @@ let callStartTime = null;
 let isGroupChat = false;
 
 // -- Supabase init --
-function initSupabase(url, key) {
-  if (typeof supabase === 'undefined') return toast('Supabase SDK не загружен');
-  supabase = supabase.createClient(url, key, {
-    auth: { persistSession: true, autoRefreshToken: true }
+function waitForSupabase(ms = 15000) {
+  return new Promise((resolve, reject) => {
+    if (typeof supabase !== 'undefined' && supabase?.createClient) return resolve();
+    const start = Date.now();
+    const check = setInterval(() => {
+      if (typeof supabase !== 'undefined' && supabase?.createClient) {
+        clearInterval(check);
+        resolve();
+      } else if (Date.now() - start > ms) {
+        clearInterval(check);
+        reject(new Error('Supabase SDK не загрузился'));
+      }
+    }, 100);
   });
-  LS.set('supabase_url', url);
-  LS.set('supabase_key', key);
 }
 
-function loadSupabaseConfig() {
+async function initSupabase(url, key) {
+  try {
+    await waitForSupabase();
+    supabase = supabase.createClient(url, key, {
+      auth: { persistSession: true, autoRefreshToken: true }
+    });
+    LS.set('supabase_url', url);
+    LS.set('supabase_key', key);
+  } catch {
+    toast('Supabase SDK не загружен');
+  }
+}
+
+async function loadSupabaseConfig() {
   const url = LS.get('supabase_url');
   const key = LS.get('supabase_key');
   if (url && key) {
-    initSupabase(url, key);
-    return true;
+    await initSupabase(url, key);
+    return supabase !== null;
   }
   return false;
 }
@@ -579,13 +599,15 @@ $('setupBtn').onclick = () => {
   showScreen('setup');
 };
 
-$('saveSupabaseBtn').onclick = () => {
+$('saveSupabaseBtn').onclick = async () => {
   const url = $('supabaseUrl').value.trim();
   const key = $('supabaseAnonKey').value.trim();
   if (!url || !key) return toast('Заполни оба поля');
-  initSupabase(url, key);
-  toast('Сохранено!');
-  showScreen('landing');
+  await initSupabase(url, key);
+  if (supabase) {
+    toast('Сохранено!');
+    showScreen('landing');
+  }
 };
 
 // -- Auth UI --
@@ -691,19 +713,21 @@ $('twofaBtn').onclick = async () => {
 
 // Auto-login check
 (async () => {
-  if (loadSupabaseConfig()) {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-      const profile = await loadProfile();
-      if (profile) {
-        LS.set('session', true);
-        showScreen('home');
-        renderChatList();
-        initPeer(currentUser.id.slice(0, 8));
-        return;
+  try {
+    if (await loadSupabaseConfig()) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const profile = await loadProfile();
+        if (profile) {
+          LS.set('session', true);
+          showScreen('home');
+          renderChatList();
+          initPeer(currentUser.id.slice(0, 8));
+          return;
+        }
       }
     }
-  }
+  } catch {}
   showScreen('landing');
 })();
 
