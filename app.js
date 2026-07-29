@@ -1,66 +1,55 @@
-/* TalkHub — Full Messenger */
+/* TalkHub — Full Messenger (localStorage + PeerJS) */
 
 const $ = id => document.getElementById(id);
-const LS = {
-  get(k, d) { try { return JSON.parse(localStorage.getItem('th_' + k)) } catch { return d } },
-  set(k, v) { localStorage.setItem('th_' + k, JSON.stringify(v)) },
-  del(k) { localStorage.removeItem('th_' + k) }
+const RS = id => document.querySelectorAll(id);
+
+const DB = {
+  _data: null,
+  _changed: false,
+  load() {
+    try {
+      this._data = JSON.parse(localStorage.getItem('th_data'));
+      if (!this._data || typeof this._data !== 'object') throw 0;
+    } catch {
+      this._data = { users: {}, chats: [], messages: {}, peer_id: '' };
+    }
+    return this;
+  },
+  save() {
+    localStorage.setItem('th_data', JSON.stringify(this._data));
+    this._changed = false;
+  },
+  _mark() { this._changed = true; },
+  // Users
+  getUser(name) { return this._data.users[name] || null; },
+  setUser(name, data) { this._data.users[name] = data; this._mark(); },
+  userExists(name) { return name in this._data.users; },
+  allUsers() { return Object.values(this._data.users); },
+  // Chats
+  getChat(id) { return this._data.chats.find(c => c.id === id) || null; },
+  addChat(chat) { this._data.chats.push(chat); this._mark(); return chat; },
+  updateChat(id, data) { const i = this._data.chats.findIndex(c => c.id === id); if (i >= 0) { Object.assign(this._data.chats[i], data); this._mark(); } },
+  userChats(username) { return this._data.chats.filter(c => c.members.includes(username)); },
+  // Messages
+  getMessages(chatId) { return this._data.messages[chatId] || []; },
+  addMessage(chatId, msg) {
+    if (!this._data.messages[chatId]) this._data.messages[chatId] = [];
+    this._data.messages[chatId].push(msg);
+    this._mark();
+  }
 };
 
-let supabase = null;
 let peer = null;
 let localStream = null;
 let call = null;
 let currentUser = null;
 let currentChatId = null;
-let chatSubscriptions = [];
-let currentPeerId = null;
-let remotePeerId = null;
 let callTimerInterval = null;
 let callStartTime = null;
 let isGroupChat = false;
+let remotePeerId = null;
+let peerInitAttempted = false;
 
-// -- Supabase init --
-function waitForSupabase(ms = 15000) {
-  return new Promise((resolve, reject) => {
-    if (typeof window.supabase !== 'undefined' && window.supabase?.createClient) return resolve();
-    const start = Date.now();
-    const check = setInterval(() => {
-      if (typeof window.supabase !== 'undefined' && window.supabase?.createClient) {
-        clearInterval(check);
-        resolve();
-      } else if (Date.now() - start > ms) {
-        clearInterval(check);
-        reject(new Error('Supabase SDK не загрузился'));
-      }
-    }, 100);
-  });
-}
-
-async function initSupabase(url, key) {
-  try {
-    await waitForSupabase();
-    supabase = window.supabase.createClient(url, key, {
-      auth: { persistSession: true, autoRefreshToken: true }
-    });
-    LS.set('supabase_url', url);
-    LS.set('supabase_key', key);
-  } catch {
-    toast('Supabase SDK не загружен');
-  }
-}
-
-async function loadSupabaseConfig() {
-  const url = LS.get('supabase_url');
-  const key = LS.get('supabase_key');
-  if (url && key) {
-    await initSupabase(url, key);
-    return supabase !== null;
-  }
-  return false;
-}
-
-// -- Helpers --
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => {
     s.classList.remove('active', 'fade-out');
@@ -98,11 +87,9 @@ function dateStr(d) {
   return t.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 }
 
-function formatAvatarUrl(path) {
-  return null;
-}
+function uid() { return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10); }
 
-// -- Crypto helpers --
+// -- Crypto --
 function generateKey() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?';
   const arr = new Uint8Array(256);
@@ -167,38 +154,47 @@ const QUESTIONS = [
 ];
 
 async function registerUser(username, displayName, password) {
-  const existing = await supabase.from('local_users').select('username').eq('username', username).maybeSingle();
-  if (existing?.data) throw new Error('Username уже занят');
+  DB.load();
+  if (DB.userExists(username)) throw new Error('Username уже занят');
 
   const encKey = generateKey();
   const pwHash = await hashPassword(password);
   const enc = await encryptKey(encKey, password);
 
-  const { error } = await supabase.from('local_users').insert({
+  DB.setUser(username, {
     username,
     display_name: displayName,
     password_hash: pwHash.hash,
     pw_salt: pwHash.salt,
     enc_salt: enc.salt,
     enc_iv: enc.iv,
-    encrypted_key: enc.data
+    encrypted_key: enc.data,
+    questions: null,
+    rec_salt: null,
+    rec_iv: null,
+    recovery_key: null
   });
-  if (error) throw new Error('Ошибка регистрации: ' + error.message);
+  DB.save();
 
-  LS.set('reg_enc_key', encKey);
-  LS.set('reg_username', username);
-  LS.set('reg_display_name', displayName);
-  LS.set('reg_password', password);
+  // Store temp registration data
+  localStorage.setItem('th_reg_enc_key', encKey);
+  localStorage.setItem('th_reg_username', username);
+  localStorage.setItem('th_reg_display_name', displayName);
+  localStorage.setItem('th_reg_password', password);
   return encKey;
 }
 
 async function saveQuestions(username, answers) {
+  DB.load();
+  const user = DB.getUser(username);
+  if (!user) throw new Error('Пользователь не найден');
+
   const hashed = [];
   for (let i = 0; i < QUESTIONS.length; i++) {
     hashed.push({ q: QUESTIONS[i], a: await hashAnswer(answers[i] || '') });
   }
-  // Encrypt key with answers for recovery
-  const encKey = LS.get('reg_enc_key');
+
+  const encKey = localStorage.getItem('th_reg_enc_key');
   const recoveryPass = answers.join('|').toLowerCase().trim();
   const recSalt = crypto.getRandomValues(new Uint8Array(32));
   const recIv = crypto.getRandomValues(new Uint8Array(12));
@@ -210,23 +206,18 @@ async function saveQuestions(username, answers) {
   const recEncrypted = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: recIv }, recAesKey, new TextEncoder().encode(encKey)
   );
-  const { error } = await supabase.from('local_users')
-    .update({
-      questions: JSON.stringify(hashed),
-      rec_salt: btoa(String.fromCharCode(...recSalt)),
-      rec_iv: btoa(String.fromCharCode(...recIv)),
-      recovery_key: btoa(String.fromCharCode(...new Uint8Array(recEncrypted)))
-    })
-    .eq('username', username);
-  if (error) throw new Error('Ошибка сохранения вопросов');
+
+  user.questions = JSON.stringify(hashed);
+  user.rec_salt = btoa(String.fromCharCode(...recSalt));
+  user.rec_iv = btoa(String.fromCharCode(...recIv));
+  user.recovery_key = btoa(String.fromCharCode(...new Uint8Array(recEncrypted)));
+  DB.save();
 }
 
 async function loginUser(username, password) {
-  const { data: user, error } = await supabase.from('local_users')
-    .select('*')
-    .eq('username', username)
-    .single();
-  if (error || !user) throw new Error('Пользователь не найден');
+  DB.load();
+  const user = DB.getUser(username);
+  if (!user) throw new Error('Пользователь не найден');
 
   const pwHash = await hashPassword(password, user.pw_salt);
   if (pwHash.hash !== user.password_hash) throw new Error('Неверный пароль');
@@ -237,30 +228,26 @@ async function loginUser(username, password) {
     data: user.encrypted_key
   }, password);
 
-  LS.set('session_key', encKey);
-  LS.set('session_user', username);
+  localStorage.setItem('th_session_key', encKey);
+  localStorage.setItem('th_session_user', username);
   currentUser = { id: username, username, display_name: user.display_name, avatar_url: null };
   return encKey;
 }
 
 async function loadUserForRecovery(username) {
-  const { data, error } = await supabase.from('local_users')
-    .select('username, display_name, questions')
-    .eq('username', username)
-    .single();
-  if (error || !data) throw new Error('Пользователь не найден');
+  DB.load();
+  const user = DB.getUser(username);
+  if (!user) throw new Error('Пользователь не найден');
   let questions;
-  try { questions = typeof data.questions === 'string' ? JSON.parse(data.questions) : data.questions; } catch { questions = []; }
+  try { questions = typeof user.questions === 'string' ? JSON.parse(user.questions) : user.questions; } catch { questions = []; }
   if (!questions || questions.length === 0) throw new Error('Вопросы безопасности не найдены');
-  return { username: data.username, display_name: data.display_name, questions };
+  return { username: user.username, display_name: user.display_name, questions };
 }
 
 async function recoverKey(username, answers) {
-  const { data: user, error } = await supabase.from('local_users')
-    .select('*')
-    .eq('username', username)
-    .single();
-  if (error || !user) throw new Error('Пользователь не найден');
+  DB.load();
+  const user = DB.getUser(username);
+  if (!user) throw new Error('Пользователь не найден');
 
   let questions;
   try { questions = typeof user.questions === 'string' ? JSON.parse(user.questions) : user.questions; } catch { questions = []; }
@@ -274,7 +261,6 @@ async function recoverKey(username, answers) {
   }
   if (correct < 3) throw new Error(`Правильных ответов: ${correct} из 5. Нужно минимум 3.`);
 
-  // Decrypt recovery key using all 5 answers
   const recoveryPass = answers.join('|').toLowerCase().trim();
   const recSalt = Uint8Array.from(atob(user.rec_salt), c => c.charCodeAt(0));
   const recIv = Uint8Array.from(atob(user.rec_iv), c => c.charCodeAt(0));
@@ -289,10 +275,11 @@ async function recoverKey(username, answers) {
 }
 
 async function logout() {
-  chatSubscriptions.forEach(s => s.unsubscribe());
-  chatSubscriptions = [];
-  LS.del('session_key');
-  LS.del('session_user');
+  peer?.destroy();
+  peer = null;
+  peerInitAttempted = false;
+  localStorage.removeItem('th_session_key');
+  localStorage.removeItem('th_session_user');
   currentUser = null;
   currentChatId = null;
   showScreen('landing');
@@ -300,234 +287,225 @@ async function logout() {
 
 // -- Profile --
 async function loadProfile() {
-  const username = LS.get('session_user');
+  const username = localStorage.getItem('th_session_user');
   if (!username) { showScreen('landing'); return null; }
-  const { data } = await supabase.from('local_users')
-    .select('username, display_name')
-    .eq('username', username)
-    .single();
-  if (data) {
-    currentUser = { id: data.username, username: data.username, display_name: data.display_name, avatar_url: null };
+  DB.load();
+  const user = DB.getUser(username);
+  if (user) {
+    currentUser = { id: user.username, username: user.username, display_name: user.display_name, avatar_url: null };
   }
-  return data;
+  return user;
 }
 
 async function updateDisplayName(name) {
-  const { error } = await supabase.from('local_users')
-    .update({ display_name: name })
-    .eq('username', currentUser.id);
-  if (error) throw error;
+  DB.load();
+  const user = DB.getUser(currentUser.id);
+  if (user) {
+    user.display_name = name;
+    DB.save();
+  }
   currentUser.display_name = name;
 }
 
 async function changePassword(newPassword) {
   const pwHash = await hashPassword(newPassword);
-  const sessionKey = LS.get('session_key');
+  const sessionKey = localStorage.getItem('th_session_key');
   if (!sessionKey) throw new Error('Нет ключа сессии');
   const enc = await encryptKey(sessionKey, newPassword);
-  const { error } = await supabase.from('local_users')
-    .update({
-      password_hash: pwHash.hash,
-      pw_salt: pwHash.salt,
-      enc_salt: enc.salt,
-      enc_iv: enc.iv,
-      encrypted_key: enc.data
-    })
-    .eq('username', currentUser.id);
-  if (error) throw error;
+  DB.load();
+  const user = DB.getUser(currentUser.id);
+  if (!user) throw new Error('Пользователь не найден');
+  user.password_hash = pwHash.hash;
+  user.pw_salt = pwHash.salt;
+  user.enc_salt = enc.salt;
+  user.enc_iv = enc.iv;
+  user.encrypted_key = enc.data;
+  DB.save();
 }
 
 // -- Search --
-async function searchUsers(query) {
+function searchUsers(query) {
   if (!query || query.length < 2) return [];
-  const { data } = await supabase.from('local_users')
-    .select('username, display_name')
-    .ilike('username', query + '%')
-    .limit(10);
-  return (data || []).map(u => ({ id: u.username, username: u.username, display_name: u.display_name, avatar_url: null }));
+  DB.load();
+  const q = query.toLowerCase();
+  return DB.allUsers()
+    .filter(u => u.username.startsWith(q))
+    .slice(0, 10)
+    .map(u => ({ id: u.username, username: u.username, display_name: u.display_name, avatar_url: null }));
 }
 
-async function getUserByUsername(username) {
-  const { data } = await supabase.from('local_users')
-    .select('username, display_name')
-    .eq('username', username)
-    .single();
-  if (!data) return null;
-  return { id: data.username, username: data.username, display_name: data.display_name, avatar_url: null };
+function getUserByUsername(username) {
+  DB.load();
+  const user = DB.getUser(username);
+  if (!user) return null;
+  return { id: user.username, username: user.username, display_name: user.display_name, avatar_url: null };
 }
 
 // -- Chats --
-async function loadChatList() {
-  const { data: memberships } = await supabase.from('chat_members')
-    .select('chat_id, chats!inner(id, type, name, created_at)')
-    .eq('user_id', currentUser.id)
-    .order('chat_id', { ascending: false });
+function loadChatList() {
+  DB.load();
+  const memberships = DB.userChats(currentUser.id);
 
-  if (!memberships) return [];
-
-  const chatIds = memberships.map(m => m.chat_id);
-  if (chatIds.length === 0) return [];
-
-  const { data: chats } = await supabase.from('chats')
-    .select('*')
-    .in('id', chatIds)
-    .order('created_at', { ascending: false });
-
-  // Get last message for each chat
-  const result = [];
-  for (const chat of chats || []) {
-    const { data: lastMsg } = await supabase.from('messages')
-      .select('content, created_at, file_url')
-      .eq('chat_id', chat.id)
-      .order('created_at', { ascending: false })
-      .limit(1);
+  const result = memberships.map(chat => {
+    const msgs = DB.getMessages(chat.id);
+    const lastMsg = msgs.length > 0 ? msgs[msgs.length - 1] : null;
 
     let name = chat.name;
-    let avatar = null;
-
     if (chat.type === 'dm') {
-      const { data: members } = await supabase.from('chat_members')
-        .select('user_id')
-        .eq('chat_id', chat.id);
-      const otherId = members?.find(m => m.user_id !== currentUser.id)?.user_id;
+      const otherId = chat.members.find(m => m !== currentUser.id);
       if (otherId) {
-        const { data: other } = await supabase.from('local_users')
-          .select('display_name')
-          .eq('username', otherId)
-          .single();
-        if (other) {
-          name = other.display_name;
-        }
+        const other = DB.getUser(otherId);
+        if (other) name = other.display_name;
       }
     }
 
-    result.push({
+    return {
       ...chat,
       display_name: name,
-      avatar_url: avatar,
-      last_message: lastMsg?.[0]?.content || lastMsg?.[0]?.file_url ? 'Файл' : '',
-      last_time: lastMsg?.[0]?.created_at || chat.created_at
-    });
-  }
+      avatar_url: null,
+      last_message: lastMsg?.content || (lastMsg?.file_url ? 'Файл' : ''),
+      last_time: lastMsg?.created_at || chat.created_at
+    };
+  });
 
   result.sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
   return result;
 }
 
 async function createOrGetDM(otherUserId) {
-  // Check if DM already exists
-  const { data: myChats } = await supabase.from('chat_members')
-    .select('chat_id')
-    .eq('user_id', currentUser.id);
-  const chatIds = myChats?.map(c => c.chat_id) || [];
-
-  if (chatIds.length > 0) {
-    for (const cid of chatIds) {
-      const { data: members } = await supabase.from('chat_members')
-        .select('user_id')
-        .eq('chat_id', cid);
-      const ids = members?.map(m => m.user_id) || [];
-      if (ids.length === 2 && ids.includes(currentUser.id) && ids.includes(otherUserId)) {
-        return cid;
-      }
+  DB.load();
+  const myChats = DB.userChats(currentUser.id);
+  for (const chat of myChats) {
+    if (chat.type === 'dm' && chat.members.includes(otherUserId)) {
+      return chat.id;
     }
   }
 
-  // Create new DM
-  const { data: chat, error } = await supabase.from('chats')
-    .insert({ type: 'dm' })
-    .select()
-    .single();
-  if (error) throw error;
-
-  await supabase.from('chat_members').insert([
-    { chat_id: chat.id, user_id: currentUser.id },
-    { chat_id: chat.id, user_id: otherUserId }
-  ]);
-
+  const chat = {
+    id: uid(),
+    type: 'dm',
+    name: null,
+    created_at: new Date().toISOString(),
+    members: [currentUser.id, otherUserId]
+  };
+  DB.addChat(chat);
+  DB.save();
   return chat.id;
 }
 
 async function createGroup(name, memberIds) {
+  DB.load();
   const allMembers = [...new Set([currentUser.id, ...memberIds])];
-  const { data: chat, error } = await supabase.from('chats')
-    .insert({ type: 'group', name })
-    .select()
-    .single();
-  if (error) throw error;
-
-  await supabase.from('chat_members').insert(
-    allMembers.map(uid => ({ chat_id: chat.id, user_id: uid }))
-  );
-
+  const chat = {
+    id: uid(),
+    type: 'group',
+    name,
+    created_at: new Date().toISOString(),
+    members: allMembers
+  };
+  DB.addChat(chat);
+  DB.save();
   return chat.id;
 }
 
-async function getChatInfo(chatId) {
-  const { data } = await supabase.from('chats').select('*').eq('id', chatId).single();
-  return data;
+function getChatInfo(chatId) {
+  DB.load();
+  return DB.getChat(chatId);
 }
 
-async function getChatMembers(chatId) {
-  const { data } = await supabase.from('chat_members').select('user_id').eq('chat_id', chatId);
-  return data?.map(m => m.user_id) || [];
+function getChatMembers(chatId) {
+  DB.load();
+  const chat = DB.getChat(chatId);
+  return chat?.members || [];
 }
 
 // -- Messages --
-async function loadMessages(chatId) {
-  const { data } = await supabase.from('messages')
-    .select('*')
-    .eq('chat_id', chatId)
-    .order('created_at', { ascending: true })
-    .limit(100);
-  return data || [];
+function loadMessages(chatId) {
+  DB.load();
+  return DB.getMessages(chatId);
 }
 
-async function getMessageSender(senderId) {
-  const { data } = await supabase.from('local_users')
-    .select('display_name')
-    .eq('username', senderId)
-    .single();
-  return data ? { display_name: data.display_name, avatar_url: null } : null;
+function getMessageSender(senderId) {
+  DB.load();
+  const user = DB.getUser(senderId);
+  return user ? { display_name: user.display_name, avatar_url: null } : null;
 }
 
 async function sendMessage(chatId, content, fileUrl = null, fileName = null) {
-  const { error } = await supabase.from('messages').insert({
+  DB.load();
+  const msg = {
+    id: uid(),
     chat_id: chatId,
     sender_id: currentUser.id,
     content,
     file_url: fileUrl,
-    file_name: fileName
-  });
-  if (error) throw error;
-}
-
-async function uploadFile(file) {
-  const ext = file.name.split('.').pop();
-  const path = `chat/${currentChatId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-  await supabase.storage.from('files').upload(path, file);
-  const { data: { publicUrl } } = supabase.storage.from('files').getPublicUrl(path);
-  return { url: publicUrl, name: file.name };
-}
-
-// -- Subscribe to messages (real-time) --
-function subscribeToChat(chatId) {
-  // Unsubscribe previous
-  chatSubscriptions.forEach(s => s.unsubscribe());
-  chatSubscriptions = [];
-
-  const sub = supabase.channel('chat:' + chatId)
-    .on('postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
-      async (payload) => {
-        const msg = payload.new;
-        const sender = await getMessageSender(msg.sender_id);
-        const isMine = msg.sender_id === currentUser.id;
-        renderMessage(msg, sender, isMine);
+    file_name: fileName,
+    created_at: new Date().toISOString()
+  };
+  DB.addMessage(chatId, msg);
+  DB.save();
+  // Broadcast via PeerJS if recipient is online
+  const chat = DB.getChat(chatId);
+  if (chat) {
+    for (const memberId of chat.members) {
+      if (memberId !== currentUser.id) {
+        broadcastMessage(memberId, msg);
       }
-    )
-    .subscribe();
-  chatSubscriptions.push(sub);
+    }
+  }
+  return msg;
+}
+
+// -- PeerJS messaging --
+function getPeerId(username) {
+  return 'th_' + username.slice(0, 12);
+}
+
+let dataConns = {};
+
+function broadcastMessage(targetUsername, msg) {
+  if (!peer || !peer.open) return;
+  const targetPeerId = getPeerId(targetUsername);
+  try {
+    let conn = dataConns[targetUsername];
+    if (conn && conn.open) {
+      conn.send({ type: 'message', data: msg });
+      return;
+    }
+    conn = peer.connect(targetPeerId, { reliable: true });
+    conn.on('open', () => {
+      dataConns[targetUsername] = conn;
+      conn.send({ type: 'message', data: msg });
+    });
+    conn.on('error', () => {});
+  } catch {}
+}
+
+function setupPeerDataListener() {
+  if (!peer) return;
+  peer.on('connection', (conn) => {
+    const username = conn.peer.replace('th_', '');
+    dataConns[username] = conn;
+    conn.on('data', (data) => {
+      if (data.type === 'message') {
+        handleIncomingMessage(data.data);
+      }
+    });
+    conn.on('close', () => { delete dataConns[username]; });
+  });
+}
+
+function handleIncomingMessage(msg) {
+  // Re-save to DB
+  DB.load();
+  DB.addMessage(msg.chat_id, msg);
+  DB.save();
+  // If current chat is open, render
+  if (currentChatId === msg.chat_id) {
+    const sender = getMessageSender(msg.sender_id);
+    const isMine = false;
+    renderMessage(msg, sender, isMine);
+  }
 }
 
 // -- Render message --
@@ -581,23 +559,20 @@ async function openChat(chatId) {
   currentChatId = chatId;
   isGroupChat = false;
 
-  const chat = await getChatInfo(chatId);
+  const chat = getChatInfo(chatId);
   isGroupChat = chat?.type === 'group';
 
-  const members = await getChatMembers(chatId);
+  const members = getChatMembers(chatId);
   const otherId = members.find(id => id !== currentUser.id);
 
   let chatName = chat?.name || 'Чат';
   let avatarUrl = null;
 
   if (chat?.type === 'dm' && otherId) {
-    const { data: other } = await supabase.from('local_users')
-      .select('display_name')
-      .eq('username', otherId)
-      .single();
+    const other = getUserByUsername(otherId);
     if (other) {
       chatName = other.display_name;
-      remotePeerId = otherId.slice(0, 8);
+      remotePeerId = otherId;
     }
   }
 
@@ -607,23 +582,20 @@ async function openChat(chatId) {
   showScreen('chat');
 
   // Load existing messages
-  const msgs = await loadMessages(chatId);
+  const msgs = loadMessages(chatId);
   for (const msg of msgs) {
-    const sender = await getMessageSender(msg.sender_id);
+    const sender = getMessageSender(msg.sender_id);
     const isMine = msg.sender_id === currentUser.id;
     renderMessage(msg, sender, isMine);
   }
-
-  subscribeToChat(chatId);
 }
 
 // -- Render chat list --
 async function renderChatList() {
   const container = $('chatList');
   const empty = $('emptyChats');
-  const chats = await loadChatList();
+  const chats = loadChatList();
 
-  // Remove old items (keep empty state)
   container.querySelectorAll('.chat-list-item').forEach(el => el.remove());
 
   if (chats.length === 0) {
@@ -657,9 +629,12 @@ async function renderChatList() {
 }
 
 // -- WebRTC Calls (PeerJS) --
-async function initPeer(peerId) {
-  if (peer) peer.destroy();
-  currentPeerId = peerId;
+async function initPeer(username) {
+  if (peerInitAttempted) return;
+  peerInitAttempted = true;
+  if (peer) { peer.destroy(); peer = null; }
+
+  const peerId = getPeerId(username);
   peer = new Peer(peerId, {
     config: {
       iceServers: [
@@ -668,6 +643,11 @@ async function initPeer(peerId) {
       ]
     }
   });
+
+  peer.on('open', () => {
+    setupPeerDataListener();
+  });
+
   peer.on('call', async (incomingCall) => {
     if (confirm('Входящий звонок. Ответить?')) {
       try {
@@ -683,7 +663,7 @@ async function initPeer(peerId) {
         });
         call.on('close', endCall);
         call.on('error', endCall);
-      } catch (e) {
+      } catch {
         incomingCall.close();
         toast('Доступ к камере/микрофону запрещён');
       }
@@ -691,18 +671,26 @@ async function initPeer(peerId) {
       incomingCall.close();
     }
   });
+
+  peer.on('error', (err) => {
+    if (err.type === 'unavailable-id') {
+      toast('Ошибка PeerJS: ID занят. Возможно, ты уже онлайн на другом устройстве.');
+    }
+  });
 }
 
 function startCall(isVideo) {
   if (!peer || !remotePeerId) return toast('Нет собеседника для звонка');
   if (call) return toast('Уже в звонке');
+  // Derive full peer ID for remote
+  const targetPeerId = getPeerId(remotePeerId);
   navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo })
     .then(stream => {
       localStream = stream;
       $('localVideo').srcObject = stream;
       $('callOverlay').style.display = 'flex';
       stopTimer();
-      call = peer.call(remotePeerId, stream);
+      call = peer.call(targetPeerId, stream);
       call.on('stream', (remoteStream) => {
         $('remoteVideo').srcObject = remoteStream;
         startTimer();
@@ -744,7 +732,6 @@ $('goLoginBtn').onclick = () => showScreen('login');
 $('goRegisterBtn').onclick = () => showScreen('register1');
 $('backFromLoginBtn').onclick = () => showScreen('landing');
 $('backFromRegister1Btn').onclick = () => showScreen('landing');
-$('backFromSetupBtn').onclick = () => showScreen('landing');
 $('backFromProfileBtn').onclick = () => showScreen('home');
 $('backFromChatBtn').onclick = () => { showScreen('home'); renderChatList(); };
 $('backFromGroupBtn').onclick = () => showScreen('home');
@@ -754,26 +741,8 @@ $('backFromRecover3Btn').onclick = () => showScreen('login');
 $('goToLoginFromRecoverBtn').onclick = () => showScreen('login');
 $('forgotKeyBtn').onclick = () => showScreen('recover1');
 
-$('setupBtn').onclick = () => {
-  $('supabaseUrl').value = LS.get('supabase_url') || '';
-  $('supabaseAnonKey').value = LS.get('supabase_key') || '';
-  showScreen('setup');
-};
-
-$('saveSupabaseBtn').onclick = async () => {
-  const url = $('supabaseUrl').value.trim();
-  const key = $('supabaseAnonKey').value.trim();
-  if (!url || !key) return toast('Заполни оба поля');
-  await initSupabase(url, key);
-  if (supabase) {
-    toast('Сохранено!');
-    showScreen('landing');
-  }
-};
-
 // -- Auth UI --
 
-// Register step 1: create account
 let pendingEncKey = '';
 
 $('register1Btn').onclick = async () => {
@@ -788,7 +757,6 @@ $('register1Btn').onclick = async () => {
   try {
     const encKey = await registerUser(username, displayName, password);
     pendingEncKey = encKey;
-    // Show key
     $('encryptionKeyDisplay').textContent = encKey;
     showScreen('register2');
   } catch (e) {
@@ -824,27 +792,26 @@ function renderQuestions() {
   `).join('');
 }
 
-// Register step 3: save questions
 $('register3Btn').onclick = async () => {
   const inputs = document.querySelectorAll('.question-input');
   const answers = Array.from(inputs).map(inp => inp.value.trim());
   if (answers.some(a => !a)) return $('reg3Error').textContent = 'Ответь на все вопросы';
   $('reg3Error').textContent = '';
-  const username = LS.get('reg_username');
+  const username = localStorage.getItem('th_reg_username');
   try {
     await saveQuestions(username, answers);
-    const encKey = LS.get('reg_enc_key');
-    LS.set('session_key', encKey);
-    LS.set('session_user', username);
-    LS.del('reg_enc_key');
-    LS.del('reg_username');
-    LS.del('reg_display_name');
-    LS.del('reg_password');
-    currentUser = { id: username, username, display_name: LS.get('reg_display_name') || username, avatar_url: null };
+    const encKey = localStorage.getItem('th_reg_enc_key');
+    localStorage.setItem('th_session_key', encKey);
+    localStorage.setItem('th_session_user', username);
+    localStorage.removeItem('th_reg_enc_key');
+    localStorage.removeItem('th_reg_username');
+    localStorage.removeItem('th_reg_display_name');
+    localStorage.removeItem('th_reg_password');
+    currentUser = { id: username, username, display_name: username, avatar_url: null };
     toast('Аккаунт создан!');
     showScreen('home');
     renderChatList();
-    initPeer(username.slice(0, 8));
+    initPeer(username);
   } catch (e) {
     $('reg3Error').textContent = e.message;
   }
@@ -861,7 +828,7 @@ $('loginBtn').onclick = async () => {
     await loadProfile();
     showScreen('home');
     renderChatList();
-    initPeer(username.slice(0, 8));
+    initPeer(username);
   } catch (e) {
     $('loginError').textContent = e.message;
   }
@@ -926,16 +893,15 @@ $('copyRecoveredKeyBtn').onclick = () => {
 // Auto-login check
 (async () => {
   try {
-    if (await loadSupabaseConfig()) {
-      const sessionUser = LS.get('session_user');
-      const sessionKey = LS.get('session_key');
-      if (sessionUser && sessionKey) {
-        await loadProfile();
-        showScreen('home');
-        renderChatList();
-        initPeer(sessionUser.slice(0, 8));
-        return;
-      }
+    DB.load();
+    const sessionUser = localStorage.getItem('th_session_user');
+    const sessionKey = localStorage.getItem('th_session_key');
+    if (sessionUser && sessionKey && DB.getUser(sessionUser)) {
+      await loadProfile();
+      showScreen('home');
+      renderChatList();
+      initPeer(sessionUser);
+      return;
     }
   } catch {}
   showScreen('landing');
@@ -951,7 +917,7 @@ $('profileBtn').onclick = async () => {
 };
 
 $('showKeyBtn').onclick = () => {
-  const key = LS.get('session_key');
+  const key = localStorage.getItem('th_session_key');
   if (!key) return toast('Ключ не найден');
   toast('Ключ: ' + key.slice(0, 20) + '... (сохранён в сессии)');
 };
@@ -981,7 +947,6 @@ $('changePasswordBtn').onclick = async () => {
 
 $('logoutBtn').onclick = logout;
 
-// remove avatar-related handlers since they're not used
 $('changeAvatarBtn') && ($('changeAvatarBtn').onclick = null);
 $('avatarFileInput') && ($('avatarFileInput').onchange = null);
 
@@ -996,12 +961,12 @@ $('searchInput').oninput = async () => {
   const q = $('searchInput').value.trim();
   const results = $('searchResults');
   if (q.length < 2) { results.innerHTML = ''; return; }
-  const users = await searchUsers(q);
+  const users = searchUsers(q);
   results.innerHTML = users
     .filter(u => u.id !== currentUser.id)
     .map(u => `
       <div class="search-result-item" data-userid="${u.id}">
-        <div class="avatar-small">${formatAvatarUrl(u.avatar_url) ? `<img src="${formatAvatarUrl(u.avatar_url)}">` : '<svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 22c0-6 4-10 8-10s8 4 8 10" fill="none" stroke="currentColor" stroke-width="2"/></svg>'}</div>
+        <div class="avatar-small"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 22c0-6 4-10 8-10s8 4 8 10" fill="none" stroke="currentColor" stroke-width="2"/></svg></div>
         <div>
           <div class="sr-name">${u.display_name}</div>
           <div class="sr-username">@${u.username}</div>
@@ -1012,7 +977,7 @@ $('searchInput').oninput = async () => {
   results.querySelectorAll('.search-result-item').forEach(el => {
     el.onclick = async () => {
       const uid = el.dataset.userid;
-      const otherUser = await getUserByUsername(el.querySelector('.sr-username').textContent.slice(1));
+      const otherUser = getUserByUsername(el.querySelector('.sr-username').textContent.slice(1));
       if (!otherUser) return;
       try {
         const chatId = await createOrGetDM(uid);
@@ -1020,7 +985,7 @@ $('searchInput').oninput = async () => {
         $('searchInput').value = '';
         $('searchResults').innerHTML = '';
         openChat(chatId);
-      } catch (e) {
+      } catch {
         toast('Ошибка создания чата');
       }
     };
@@ -1033,6 +998,7 @@ $('createGroupBtn').onclick = () => {
   $('groupSearchInput').value = '';
   $('groupSearchResults').innerHTML = '';
   $('selectedMembers').innerHTML = '';
+  selectedGroupMembers.clear();
   showScreen('createGroup');
 };
 
@@ -1042,12 +1008,12 @@ $('groupSearchInput').oninput = async () => {
   const q = $('groupSearchInput').value.trim();
   const results = $('groupSearchResults');
   if (q.length < 2) { results.innerHTML = ''; return; }
-  const users = await searchUsers(q);
+  const users = searchUsers(q);
   results.innerHTML = users
     .filter(u => u.id !== currentUser.id && !selectedGroupMembers.has(u.id))
     .map(u => `
       <div class="search-result-item" data-userid="${u.id}">
-        <div class="avatar-small">${formatAvatarUrl(u.avatar_url) ? `<img src="${formatAvatarUrl(u.avatar_url)}">` : '<svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 22c0-6 4-10 8-10s8 4 8 10" fill="none" stroke="currentColor" stroke-width="2"/></svg>'}</div>
+        <div class="avatar-small"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 22c0-6 4-10 8-10s8 4 8 10" fill="none" stroke="currentColor" stroke-width="2"/></svg></div>
         <div>
           <div class="sr-name">${u.display_name}</div>
           <div class="sr-username">@${u.username}</div>
@@ -1107,6 +1073,13 @@ $('chatSendBtn').onclick = async () => {
   $('chatInput').value = '';
   try {
     await sendMessage(currentChatId, text);
+    // Render locally immediately
+    const msg = DB.getMessages(currentChatId);
+    const lastMsg = msg[msg.length - 1];
+    if (lastMsg) {
+      const sender = getMessageSender(lastMsg.sender_id);
+      renderMessage(lastMsg, sender, true);
+    }
   } catch (e) {
     toast('Ошибка отправки');
   }
@@ -1121,9 +1094,20 @@ $('chatFileInput').onchange = async (e) => {
   const file = e.target.files[0];
   if (!file || !currentChatId) return;
   try {
-    const { url, name } = await uploadFile(file);
-    await sendMessage(currentChatId, null, url, name);
-  } catch (e) {
+    // Read file as Data URL
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const dataUrl = ev.target.result;
+      await sendMessage(currentChatId, null, dataUrl, file.name);
+      const msg = DB.getMessages(currentChatId);
+      const lastMsg = msg[msg.length - 1];
+      if (lastMsg) {
+        const sender = getMessageSender(lastMsg.sender_id);
+        renderMessage(lastMsg, sender, true);
+      }
+    };
+    reader.readAsDataURL(file);
+  } catch {
     toast('Ошибка загрузки файла');
   }
   $('chatFileInput').value = '';
