@@ -57,14 +57,14 @@ function addMessage(text, type, extra = {}) {
     if (extra.img) {
       const img = document.createElement('img');
       img.src = extra.img;
-      img.onclick = () => window.open(extra.img, '_blank');
+      img.onclick = () => { const v = document.createElement('div'); v.className = 'img-viewer'; v.onclick = () => v.remove(); const i = document.createElement('img'); i.src = extra.img; v.appendChild(i); document.body.appendChild(v); };
       el.appendChild(img);
     } else if (extra.fileName && extra.fileData) {
       const a = document.createElement('a');
       a.href = extra.fileData;
       a.download = extra.fileName;
       a.className = 'file-link';
-      a.textContent = '📎 ' + extra.fileName;
+      a.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" style="flex-shrink:0"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M14 2v6h6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> ' + extra.fileName;
       el.appendChild(a);
     } else {
       const t = document.createElement('div');
@@ -105,6 +105,28 @@ function sendFile(file) {
 }
 
 // --- Call handling ---
+let callTimerInterval = null;
+let callStartTime = null;
+
+function startTimer() {
+  callStartTime = Date.now();
+  clearInterval(callTimerInterval);
+  callTimerInterval = setInterval(() => {
+    if (!callStartTime) return;
+    const s = Math.floor((Date.now() - callStartTime) / 1000);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    $('callTimer').textContent = String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  }, 1000);
+}
+
+function stopTimer() {
+  clearInterval(callTimerInterval);
+  callTimerInterval = null;
+  callStartTime = null;
+  $('callTimer').textContent = '00:00';
+}
+
 async function startCall(isVideo) {
   if (call) return toast('Уже в звонке');
   if (!peer || !conn) return toast('Нет подключения');
@@ -117,18 +139,18 @@ async function startCall(isVideo) {
     $('localVideo').srcObject = localStream;
     $('callOverlay').style.display = 'flex';
     $('remoteVideo').srcObject = null;
+    stopTimer();
 
     call = peer.call(remotePeerId, localStream);
 
     call.on('stream', (remoteStream) => {
       $('remoteVideo').srcObject = remoteStream;
-      $('callStatus').textContent = 'В звонке';
+      startTimer();
     });
 
     call.on('close', endCall);
     call.on('error', () => { toast('Ошибка вызова'); endCall(); });
 
-    $('callStatus').textContent = 'Звоним...';
   } catch (e) {
     toast('Доступ к камере/микрофону запрещён');
   }
@@ -144,12 +166,13 @@ function answerCall(incomingCall) {
     $('localVideo').srcObject = stream;
     $('callOverlay').style.display = 'flex';
     $('remoteVideo').srcObject = null;
+    stopTimer();
 
     call.answer(stream);
 
     call.on('stream', (remoteStream) => {
       $('remoteVideo').srcObject = remoteStream;
-      $('callStatus').textContent = 'В звонке';
+      startTimer();
     });
 
     call.on('close', endCall);
@@ -162,6 +185,7 @@ function answerCall(incomingCall) {
 }
 
 function endCall() {
+  stopTimer();
   if (localStream) {
     localStream.getTracks().forEach(t => t.stop());
     localStream = null;
@@ -210,7 +234,8 @@ function initPeer(id, creatorName, isCreator) {
   });
 
   peer.on('call', (incomingCall) => {
-    if (confirm(`${incomingCall.metadata?.name || 'Собеседник'} звонит. Ответить?`)) {
+    const name = incomingCall.metadata?.name || 'Собеседник';
+    if (confirm(`${name} звонит. Ответить?`)) {
       answerCall(incomingCall);
     } else {
       incomingCall.close();
@@ -282,6 +307,11 @@ function setupConnection(c) {
 }
 
 // --- UI Events ---
+$('backFromCreatedBtn').onclick = () => {
+  if (peer) { peer.destroy(); peer = null; }
+  showScreen('landing');
+};
+
 $('createRoomBtn').onclick = async () => {
   const name = prompt('Ваш ник (макс 20 символов):')?.trim();
   if (!name) return;
@@ -352,6 +382,13 @@ $('voiceBtn').onclick = () => startCall(false);
 $('videoBtn').onclick = () => startCall(true);
 $('endCallBtn').onclick = endCall;
 
+const icons = {
+  mic: '<svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 10v2a7 7 0 01-14 0v-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 19v4M8 23h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  micOff: '<svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 10v2a7 7 0 01-7 6M5 10v2a7 7 0 008 6M12 19v4M8 23h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M23 1L1 23" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/></svg>',
+  cam: '<svg viewBox="0 0 24 24" width="28" height="28"><path d="M23 7l-7 5 7 5V7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="1" y="5" width="15" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+  camOff: '<svg viewBox="0 0 24 24" width="28" height="28"><path d="M23 7l-7 5 7 5V7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="1" y="5" width="15" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M23 1L1 23" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/></svg>',
+};
+
 let micOn = true;
 let camOn = true;
 
@@ -361,7 +398,7 @@ $('toggleMic').onclick = () => {
   if (track) {
     track.enabled = !track.enabled;
     micOn = track.enabled;
-    $('toggleMic').textContent = micOn ? '🎤' : '🔇';
+    $('toggleMic').innerHTML = (micOn ? icons.mic : icons.micOff) + '<span>Микрофон</span>';
   }
 };
 
@@ -371,7 +408,7 @@ $('toggleCam').onclick = () => {
   if (track) {
     track.enabled = !track.enabled;
     camOn = track.enabled;
-    $('toggleCam').textContent = camOn ? '📷' : '🚫';
+    $('toggleCam').innerHTML = (camOn ? icons.cam : icons.camOff) + '<span>Камера</span>';
   }
 };
 
