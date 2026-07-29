@@ -23,10 +23,10 @@ let isGroupChat = false;
 // -- Supabase init --
 function waitForSupabase(ms = 15000) {
   return new Promise((resolve, reject) => {
-    if (typeof supabase !== 'undefined' && supabase?.createClient) return resolve();
+    if (typeof window.supabase !== 'undefined' && window.supabase?.createClient) return resolve();
     const start = Date.now();
     const check = setInterval(() => {
-      if (typeof supabase !== 'undefined' && supabase?.createClient) {
+      if (typeof window.supabase !== 'undefined' && window.supabase?.createClient) {
         clearInterval(check);
         resolve();
       } else if (Date.now() - start > ms) {
@@ -40,7 +40,7 @@ function waitForSupabase(ms = 15000) {
 async function initSupabase(url, key) {
   try {
     await waitForSupabase();
-    supabase = supabase.createClient(url, key, {
+    supabase = window.supabase.createClient(url, key, {
       auth: { persistSession: true, autoRefreshToken: true }
     });
     LS.set('supabase_url', url);
@@ -63,11 +63,16 @@ async function loadSupabaseConfig() {
 // -- Helpers --
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => {
-    s.classList.remove('active');
+    s.classList.remove('active', 'fade-out');
     s.style.display = 'none';
   });
   const el = $(id);
-  if (el) { el.classList.add('active'); el.style.display = 'flex'; }
+  if (el) {
+    el.style.display = 'flex';
+    el.classList.remove('screenIn');
+    void el.offsetWidth;
+    el.classList.add('active');
+  }
 }
 
 function toast(msg, duration = 2500) {

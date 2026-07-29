@@ -76,6 +76,20 @@ html, body {
 }
 .screen.active {
   display: flex;
+  animation: screenIn 0.3s ease;
+}
+
+@keyframes screenIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.screen.fade-out {
+  animation: screenOut 0.2s ease;
+}
+@keyframes screenOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-8px); }
 }
 
 /* Buttons */
