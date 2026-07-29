@@ -22,8 +22,8 @@ let isGroupChat = false;
 
 // -- Supabase init --
 function initSupabase(url, key) {
-  if (typeof supabaseClient === 'undefined') return toast('Supabase SDK не загружен');
-  supabase = supabaseClient.createClient(url, key, {
+  if (typeof supabase === 'undefined') return toast('Supabase SDK не загружен');
+  supabase = supabase.createClient(url, key, {
     auth: { persistSession: true, autoRefreshToken: true }
   });
   LS.set('supabase_url', url);
