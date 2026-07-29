@@ -66,7 +66,7 @@ html,body { height:100%; overflow:hidden; background:var(--bg); color:var(--text
 .error { color:var(--red); font-size:13px; margin-top:8px; text-align:center; min-height:20px; }
 
 /* Chat header */
-.chat-header { display:flex; align-items:center; gap:8px; padding:8px 12px; padding-top:calc(8px + var(--safe-t)); background:var(--bg2); border-bottom:1px solid var(--border); flex-shrink:0; position:relative; z-index:10; }
+.chat-header { display:flex; align-items:center; gap:8px; padding:8px 12px; padding-top:calc(8px + var(--safe-t)); background:var(--bg2); border-bottom:1px solid var(--border); flex-shrink:0; position:relative; z-index:10; overflow:visible; }
 .chat-header-info { flex:1; min-width:0; }
 .chat-title { font-size:16px; font-weight:700; }
 .chat-status { font-size:12px; color:var(--text3); }

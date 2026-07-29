@@ -15,13 +15,10 @@ TH.toast = function(msg) {
   console.log('[toast]', msg);
   setTimeout(() => { if (el && el.textContent === msg) el.textContent = ''; }, 4000);
 };
-TH.sha256 = async function(str) {
-  if (!window.crypto?.subtle) {
-    return str.split('').reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0).toString(16).slice(0, 12);
-  }
-  const buf = new TextEncoder().encode(str);
-  const hash = await crypto.subtle.digest('SHA-256', buf);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('').slice(0, 12);
+TH.genHash = function(key) {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = ((h << 5) - h + key.charCodeAt(i)) | 0;
+  return Math.abs(h).toString(16).slice(0, 12);
 };
 TH.showScreen = function(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
@@ -38,80 +35,80 @@ const voiceBtn = $('voiceBtn'), endCallBtn = $('endCallBtn');
 const joinError = $('joinError');
 
 /* Auto-join on page load */
-(async function() {
-  try {
-    const nick = localStorage.getItem('th_last_nick');
-    const key = localStorage.getItem('th_last_key');
-    if (nick && key) {
-      document.getElementById('nickInput').value = nick;
-      document.getElementById('keyInput').value = key;
-      const hash = await TH.sha256(key);
-      TH.joinRoom(nick, hash);
-    }
-  } catch (e) { console.error('autojoin err', e); }
-})();
+try {
+  const nick = localStorage.getItem('th_last_nick');
+  const key = localStorage.getItem('th_last_key');
+  if (nick && key) {
+    document.getElementById('nickInput').value = nick;
+    document.getElementById('keyInput').value = key;
+    TH.joinRoom(nick, TH.genHash(key));
+  }
+} catch (e) { console.error('autojoin err', e); }
 
 /* Join */
-joinBtn.addEventListener('click', async () => {
+joinBtn.addEventListener('click', () => {
   try {
     const nick = nickInp.value.trim() || 'Аноним';
     const key = keyInp.value.trim();
     if (!key) { TH.toast('Введи ключ комнаты'); return; }
     console.log('join: nick=%s key=%s', nick, key);
-    const hash = await TH.sha256(key);
     localStorage.setItem('th_last_nick', nick);
     localStorage.setItem('th_last_key', key);
-    TH.joinRoom(nick, hash);
+    TH.joinRoom(nick, TH.genHash(key));
   } catch (e) { console.error('join err', e); TH.toast('Ошибка: ' + e.message); }
 });
 
 /* Enter on join inputs */
 [nickInp, keyInp].forEach(inp => {
-  inp.addEventListener('keydown', e => {
+  if (inp) inp.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); joinBtn.click(); }
   });
 });
 
 /* Send on Enter */
-msgInp.addEventListener('keydown', e => {
+if (msgInp) msgInp.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBtn.click(); }
 });
-sendBtn.addEventListener('click', () => {
+if (sendBtn) sendBtn.addEventListener('click', () => {
   TH.sendMessage(msgInp.value); msgInp.value = '';
 });
 
 /* File */
-$('attachBtn').addEventListener('click', () => fileInp.click());
+const attachBtn = $('attachBtn');
+if (attachBtn) attachBtn.addEventListener('click', () => fileInp.click());
 fileInp.addEventListener('change', () => {
   const f = fileInp.files[0]; if (f) { TH.sendFile(f); fileInp.value = ''; }
 });
 
 /* Menu */
-menuBtn.addEventListener('click', () => menuDropdown.classList.toggle('show'));
-document.addEventListener('click', e => {
-  if (!menuBtn.contains(e.target) && !menuDropdown.contains(e.target))
+if (menuBtn && menuDropdown) {
+  menuBtn.addEventListener('click', () => menuDropdown.classList.toggle('show'));
+  document.addEventListener('click', e => {
+    if (!menuBtn.contains(e.target) && !menuDropdown.contains(e.target))
+      menuDropdown.classList.remove('show');
+  });
+  const menuLeave = $('menuLeave'), menuRoomInfo = $('menuRoomInfo'), menuCopyKey = $('menuCopyKey');
+  if (menuLeave) menuLeave.addEventListener('click', () => {
+    TH.leaveRoom();
     menuDropdown.classList.remove('show');
-});
-$('menuLeave').addEventListener('click', () => {
-  TH.leaveRoom();
-  menuDropdown.classList.remove('show');
-  TH.showScreen('joinScreen');
-  nickInp.value = TH.myNick || '';
-  keyInp.value = '';
-});
-$('menuRoomInfo').addEventListener('click', () => {
-  TH.toast('Комната: ' + TH.roomHash);
-  menuDropdown.classList.remove('show');
-});
-$('menuCopyKey').addEventListener('click', () => {
-  const k = localStorage.getItem('th_last_key');
-  if (k) { navigator.clipboard.writeText(k).then(() => TH.toast('Ключ скопирован')); }
-  menuDropdown.classList.remove('show');
-});
+    TH.showScreen('joinScreen');
+    nickInp.value = TH.myNick || '';
+    keyInp.value = '';
+  });
+  if (menuRoomInfo) menuRoomInfo.addEventListener('click', () => {
+    TH.toast('Комната: ' + TH.roomHash);
+    menuDropdown.classList.remove('show');
+  });
+  if (menuCopyKey) menuCopyKey.addEventListener('click', () => {
+    const k = localStorage.getItem('th_last_key');
+    if (k) { navigator.clipboard.writeText(k).then(() => TH.toast('Ключ скопирован')); }
+    menuDropdown.classList.remove('show');
+  });
+}
 
 /* Call */
-voiceBtn.addEventListener('click', () => {
+if (voiceBtn) voiceBtn.addEventListener('click', () => {
   TH.initPeer();
   TH.startCall(false);
 });
-endCallBtn.addEventListener('click', TH.endCall);
+if (endCallBtn) endCallBtn.addEventListener('click', TH.endCall);
