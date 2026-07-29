@@ -99,108 +99,261 @@ function dateStr(d) {
 }
 
 function formatAvatarUrl(path) {
-  if (!path) return null;
-  if (path.startsWith('http')) return path;
-  const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
-  return publicUrl;
+  return null;
+}
+
+// -- Crypto helpers --
+function generateKey() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?';
+  const arr = new Uint8Array(256);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => chars[b % chars.length]).join('');
+}
+
+async function hashPassword(password, salt) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const saltBytes = salt ? Uint8Array.from(atob(salt), c => c.charCodeAt(0)) : crypto.getRandomValues(new Uint8Array(32));
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: saltBytes, iterations: 100000, hash: 'SHA-256' }, keyMaterial, 256);
+  const hash = btoa(String.fromCharCode(...new Uint8Array(bits)));
+  if (!salt) return { hash, salt: btoa(String.fromCharCode(...saltBytes)) };
+  return { hash, salt };
+}
+
+async function hashAnswer(text) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text.toLowerCase().trim()));
+  return btoa(String.fromCharCode(...new Uint8Array(hash)));
+}
+
+async function encryptKey(key, password) {
+  const enc = new TextEncoder();
+  const salt = crypto.getRandomValues(new Uint8Array(32));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  const aesKey = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+    keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+  );
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, enc.encode(key));
+  return {
+    salt: btoa(String.fromCharCode(...salt)),
+    iv: btoa(String.fromCharCode(...iv)),
+    data: btoa(String.fromCharCode(...new Uint8Array(encrypted)))
+  };
+}
+
+async function decryptKey(encrypted, password) {
+  const enc = new TextEncoder();
+  const salt = Uint8Array.from(atob(encrypted.salt), c => c.charCodeAt(0));
+  const iv = Uint8Array.from(atob(encrypted.iv), c => c.charCodeAt(0));
+  const data = Uint8Array.from(atob(encrypted.data), c => c.charCodeAt(0));
+  const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  const aesKey = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+    keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+  );
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, data);
+  return new TextDecoder().decode(decrypted);
 }
 
 // -- Auth --
-async function register(email, username, displayName, password) {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: { username, display_name: displayName }
-    }
+
+const QUESTIONS = [
+  'Имя вашего отца?',
+  'Отчество вашей матери?',
+  'Город вашего рождения?',
+  'Кличка вашего первого питомца?',
+  'Название вашей первой школы?'
+];
+
+async function registerUser(username, displayName, password) {
+  const existing = await supabase.from('local_users').select('username').eq('username', username).maybeSingle();
+  if (existing?.data) throw new Error('Username уже занят');
+
+  const encKey = generateKey();
+  const pwHash = await hashPassword(password);
+  const enc = await encryptKey(encKey, password);
+
+  const { error } = await supabase.from('local_users').insert({
+    username,
+    display_name: displayName,
+    password_hash: pwHash.hash,
+    pw_salt: pwHash.salt,
+    enc_salt: enc.salt,
+    enc_iv: enc.iv,
+    encrypted_key: enc.data
   });
-  if (error) throw error;
-  return data;
+  if (error) throw new Error('Ошибка регистрации: ' + error.message);
+
+  LS.set('reg_enc_key', encKey);
+  LS.set('reg_username', username);
+  LS.set('reg_display_name', displayName);
+  LS.set('reg_password', password);
+  return encKey;
 }
 
-async function login(email, password) {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw error;
-  return data;
+async function saveQuestions(username, answers) {
+  const hashed = [];
+  for (let i = 0; i < QUESTIONS.length; i++) {
+    hashed.push({ q: QUESTIONS[i], a: await hashAnswer(answers[i] || '') });
+  }
+  // Encrypt key with answers for recovery
+  const encKey = LS.get('reg_enc_key');
+  const recoveryPass = answers.join('|').toLowerCase().trim();
+  const recSalt = crypto.getRandomValues(new Uint8Array(32));
+  const recIv = crypto.getRandomValues(new Uint8Array(12));
+  const recKeyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(recoveryPass), 'PBKDF2', false, ['deriveKey']);
+  const recAesKey = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: recSalt, iterations: 100000, hash: 'SHA-256' },
+    recKeyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+  );
+  const recEncrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: recIv }, recAesKey, new TextEncoder().encode(encKey)
+  );
+  const { error } = await supabase.from('local_users')
+    .update({
+      questions: JSON.stringify(hashed),
+      rec_salt: btoa(String.fromCharCode(...recSalt)),
+      rec_iv: btoa(String.fromCharCode(...recIv)),
+      recovery_key: btoa(String.fromCharCode(...new Uint8Array(recEncrypted)))
+    })
+    .eq('username', username);
+  if (error) throw new Error('Ошибка сохранения вопросов');
 }
 
-async function sendOTP(email) {
-  const { error } = await supabase.auth.signInWithOtp({ email });
-  if (error) throw error;
+async function loginUser(username, password) {
+  const { data: user, error } = await supabase.from('local_users')
+    .select('*')
+    .eq('username', username)
+    .single();
+  if (error || !user) throw new Error('Пользователь не найден');
+
+  const pwHash = await hashPassword(password, user.pw_salt);
+  if (pwHash.hash !== user.password_hash) throw new Error('Неверный пароль');
+
+  const encKey = await decryptKey({
+    salt: user.enc_salt,
+    iv: user.enc_iv,
+    data: user.encrypted_key
+  }, password);
+
+  LS.set('session_key', encKey);
+  LS.set('session_user', username);
+  currentUser = { id: username, username, display_name: user.display_name, avatar_url: null };
+  return encKey;
 }
 
-async function verifyOTP(email, token) {
-  const { data, error } = await supabase.auth.verifyOtp({
-    email,
-    token,
-    type: 'email'
-  });
-  if (error) throw error;
-  return data;
+async function loadUserForRecovery(username) {
+  const { data, error } = await supabase.from('local_users')
+    .select('username, display_name, questions')
+    .eq('username', username)
+    .single();
+  if (error || !data) throw new Error('Пользователь не найден');
+  let questions;
+  try { questions = typeof data.questions === 'string' ? JSON.parse(data.questions) : data.questions; } catch { questions = []; }
+  if (!questions || questions.length === 0) throw new Error('Вопросы безопасности не найдены');
+  return { username: data.username, display_name: data.display_name, questions };
+}
+
+async function recoverKey(username, answers) {
+  const { data: user, error } = await supabase.from('local_users')
+    .select('*')
+    .eq('username', username)
+    .single();
+  if (error || !user) throw new Error('Пользователь не найден');
+
+  let questions;
+  try { questions = typeof user.questions === 'string' ? JSON.parse(user.questions) : user.questions; } catch { questions = []; }
+  if (!questions || questions.length === 0) throw new Error('Вопросы не найдены');
+  if (!user.recovery_key) throw new Error('Ключ восстановления не найден');
+
+  let correct = 0;
+  for (let i = 0; i < Math.min(questions.length, answers.length); i++) {
+    const hash = await hashAnswer(answers[i] || '');
+    if (hash === questions[i].a) correct++;
+  }
+  if (correct < 3) throw new Error(`Правильных ответов: ${correct} из 5. Нужно минимум 3.`);
+
+  // Decrypt recovery key using all 5 answers
+  const recoveryPass = answers.join('|').toLowerCase().trim();
+  const recSalt = Uint8Array.from(atob(user.rec_salt), c => c.charCodeAt(0));
+  const recIv = Uint8Array.from(atob(user.rec_iv), c => c.charCodeAt(0));
+  const recData = Uint8Array.from(atob(user.recovery_key), c => c.charCodeAt(0));
+  const recKeyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(recoveryPass), 'PBKDF2', false, ['deriveKey']);
+  const recAesKey = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: recSalt, iterations: 100000, hash: 'SHA-256' },
+    recKeyMaterial, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+  );
+  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: recIv }, recAesKey, recData);
+  return new TextDecoder().decode(decrypted);
 }
 
 async function logout() {
   chatSubscriptions.forEach(s => s.unsubscribe());
   chatSubscriptions = [];
-  await supabase.auth.signOut();
+  LS.del('session_key');
+  LS.del('session_user');
   currentUser = null;
   currentChatId = null;
-  LS.del('session');
   showScreen('landing');
 }
 
 // -- Profile --
 async function loadProfile() {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) { showScreen('landing'); return null; }
-  const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-  if (data) currentUser = data;
+  const username = LS.get('session_user');
+  if (!username) { showScreen('landing'); return null; }
+  const { data } = await supabase.from('local_users')
+    .select('username, display_name')
+    .eq('username', username)
+    .single();
+  if (data) {
+    currentUser = { id: data.username, username: data.username, display_name: data.display_name, avatar_url: null };
+  }
   return data;
 }
 
 async function updateDisplayName(name) {
-  const { error } = await supabase.from('profiles').update({ display_name: name }).eq('id', currentUser.id);
+  const { error } = await supabase.from('local_users')
+    .update({ display_name: name })
+    .eq('username', currentUser.id);
   if (error) throw error;
   currentUser.display_name = name;
 }
 
-async function updateAvatar(file) {
-  const ext = file.name.split('.').pop();
-  const path = `avatars/${currentUser.id}.${ext}`;
-  await supabase.storage.from('avatars').upload(path, file, { upsert: true });
-  const url = formatAvatarUrl(path);
-  await supabase.from('profiles').update({ avatar_url: path }).eq('id', currentUser.id);
-  currentUser.avatar_url = path;
-  return url;
-}
-
 async function changePassword(newPassword) {
-  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  const pwHash = await hashPassword(newPassword);
+  const sessionKey = LS.get('session_key');
+  if (!sessionKey) throw new Error('Нет ключа сессии');
+  const enc = await encryptKey(sessionKey, newPassword);
+  const { error } = await supabase.from('local_users')
+    .update({
+      password_hash: pwHash.hash,
+      pw_salt: pwHash.salt,
+      enc_salt: enc.salt,
+      enc_iv: enc.iv,
+      encrypted_key: enc.data
+    })
+    .eq('username', currentUser.id);
   if (error) throw error;
-}
-
-async function toggle2FA(enabled) {
-  const { error } = await supabase.from('profiles').update({ twofa_enabled: enabled }).eq('id', currentUser.id);
-  if (error) throw error;
-  currentUser.twofa_enabled = enabled;
 }
 
 // -- Search --
 async function searchUsers(query) {
   if (!query || query.length < 2) return [];
-  const { data } = await supabase.from('profiles')
-    .select('id, username, display_name, avatar_url')
+  const { data } = await supabase.from('local_users')
+    .select('username, display_name')
     .ilike('username', query + '%')
     .limit(10);
-  return data || [];
+  return (data || []).map(u => ({ id: u.username, username: u.username, display_name: u.display_name, avatar_url: null }));
 }
 
 async function getUserByUsername(username) {
-  const { data } = await supabase.from('profiles')
-    .select('id, username, display_name, avatar_url')
+  const { data } = await supabase.from('local_users')
+    .select('username, display_name')
     .eq('username', username)
     .single();
-  return data;
+  if (!data) return null;
+  return { id: data.username, username: data.username, display_name: data.display_name, avatar_url: null };
 }
 
 // -- Chats --
@@ -238,13 +391,12 @@ async function loadChatList() {
         .eq('chat_id', chat.id);
       const otherId = members?.find(m => m.user_id !== currentUser.id)?.user_id;
       if (otherId) {
-        const { data: other } = await supabase.from('profiles')
-          .select('display_name, avatar_url')
-          .eq('id', otherId)
+        const { data: other } = await supabase.from('local_users')
+          .select('display_name')
+          .eq('username', otherId)
           .single();
         if (other) {
           name = other.display_name;
-          avatar = formatAvatarUrl(other.avatar_url);
         }
       }
     }
@@ -332,11 +484,11 @@ async function loadMessages(chatId) {
 }
 
 async function getMessageSender(senderId) {
-  const { data } = await supabase.from('profiles')
-    .select('display_name, avatar_url')
-    .eq('id', senderId)
+  const { data } = await supabase.from('local_users')
+    .select('display_name')
+    .eq('username', senderId)
     .single();
-  return data;
+  return data ? { display_name: data.display_name, avatar_url: null } : null;
 }
 
 async function sendMessage(chatId, content, fileUrl = null, fileName = null) {
@@ -439,14 +591,13 @@ async function openChat(chatId) {
   let avatarUrl = null;
 
   if (chat?.type === 'dm' && otherId) {
-    const { data: other } = await supabase.from('profiles')
-      .select('display_name, avatar_url')
-      .eq('id', otherId)
+    const { data: other } = await supabase.from('local_users')
+      .select('display_name')
+      .eq('username', otherId)
       .single();
     if (other) {
       chatName = other.display_name;
-      avatarUrl = formatAvatarUrl(other.avatar_url);
-      remotePeerId = otherId.slice(0, 8); // Use first 8 chars of UUID as PeerJS ID
+      remotePeerId = otherId.slice(0, 8);
     }
   }
 
@@ -590,13 +741,18 @@ function stopTimer() {
 
 // -- Navigation Events --
 $('goLoginBtn').onclick = () => showScreen('login');
-$('goRegisterBtn').onclick = () => showScreen('register');
+$('goRegisterBtn').onclick = () => showScreen('register1');
 $('backFromLoginBtn').onclick = () => showScreen('landing');
-$('backFromRegisterBtn').onclick = () => showScreen('landing');
+$('backFromRegister1Btn').onclick = () => showScreen('landing');
 $('backFromSetupBtn').onclick = () => showScreen('landing');
 $('backFromProfileBtn').onclick = () => showScreen('home');
 $('backFromChatBtn').onclick = () => { showScreen('home'); renderChatList(); };
 $('backFromGroupBtn').onclick = () => showScreen('home');
+$('backFromRecover1Btn').onclick = () => showScreen('login');
+$('backFromRecover2Btn').onclick = () => showScreen('recover1');
+$('backFromRecover3Btn').onclick = () => showScreen('login');
+$('goToLoginFromRecoverBtn').onclick = () => showScreen('login');
+$('forgotKeyBtn').onclick = () => showScreen('recover1');
 
 $('setupBtn').onclick = () => {
   $('supabaseUrl').value = LS.get('supabase_url') || '';
@@ -616,103 +772,154 @@ $('saveSupabaseBtn').onclick = async () => {
 };
 
 // -- Auth UI --
-$('registerBtn').onclick = async () => {
-  const email = $('regEmail').value.trim();
+
+// Register step 1: create account
+let pendingEncKey = '';
+
+$('register1Btn').onclick = async () => {
   const username = $('regUsername').value.trim().toLowerCase();
   const displayName = $('regDisplayName').value.trim();
   const password = $('regPassword').value;
-  if (!email || !username || !displayName || !password)
-    return $('regError').textContent = 'Заполни все поля';
-  if (username.length < 3) return $('regError').textContent = 'Username минимум 3 символа';
-  if (password.length < 6) return $('regError').textContent = 'Пароль минимум 6 символов';
-  $('regError').textContent = '';
+  if (!username || !displayName || !password)
+    return $('reg1Error').textContent = 'Заполни все поля';
+  if (username.length < 3) return $('reg1Error').textContent = 'Username минимум 3 символа';
+  if (password.length < 6) return $('reg1Error').textContent = 'Пароль минимум 6 символов';
+  $('reg1Error').textContent = '';
   try {
-    const data = await register(email, username, displayName, password);
-    if (data?.user?.identities?.length === 0) {
-      $('regError').textContent = 'Этот email уже зарегистрирован';
-      return;
-    }
-    showScreen('verify');
+    const encKey = await registerUser(username, displayName, password);
+    pendingEncKey = encKey;
+    // Show key
+    $('encryptionKeyDisplay').textContent = encKey;
+    showScreen('register2');
   } catch (e) {
-    $('regError').textContent = e.message;
+    $('reg1Error').textContent = e.message;
   }
 };
 
-$('checkVerificationBtn').onclick = async () => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (user?.email_confirmed_at) {
-    toast('Email подтверждён!');
-    showScreen('login');
+$('copyKeyBtn').onclick = () => {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(pendingEncKey).then(() => toast('Ключ скопирован'));
   } else {
-    // Force refresh
-    const { error } = await supabase.auth.refreshSession();
-    const { data: { user: u } } = await supabase.auth.getUser();
-    if (u?.email_confirmed_at) {
-      toast('Email подтверждён!');
-      showScreen('login');
-    } else {
-      toast('Email ещё не подтверждён');
-    }
+    $('encryptionKeyDisplay').select();
+    document.execCommand('copy');
+    toast('Ключ скопирован');
   }
 };
 
-$('resendVerificationBtn').onclick = async () => {
-  const email = $('regEmail').value.trim();
-  if (email) {
-    await supabase.auth.resend({ type: 'signup', email });
-    toast('Письмо отправлено снова');
-  }
+$('keyNextBtn').onclick = () => {
+  if (!pendingEncKey) return toast('Ошибка: ключ не найден');
+  renderQuestions();
+  showScreen('register3');
 };
 
-$('loginBtn').onclick = async () => {
-  const email = $('loginEmail').value.trim();
-  const password = $('loginPassword').value;
-  if (!email || !password) return $('loginError').textContent = 'Введите email и пароль';
-  $('loginError').textContent = '';
+function renderQuestions() {
+  const container = $('questionsContainer');
+  container.innerHTML = QUESTIONS.map((q, i) => `
+    <div class="question-item">
+      <label>${q}</label>
+      <div class="input-wrap">
+        <input type="text" class="question-input" data-idx="${i}" placeholder="Ответ..." autocomplete="off">
+      </div>
+    </div>
+  `).join('');
+}
+
+// Register step 3: save questions
+$('register3Btn').onclick = async () => {
+  const inputs = document.querySelectorAll('.question-input');
+  const answers = Array.from(inputs).map(inp => inp.value.trim());
+  if (answers.some(a => !a)) return $('reg3Error').textContent = 'Ответь на все вопросы';
+  $('reg3Error').textContent = '';
+  const username = LS.get('reg_username');
   try {
-    // Step 1: Sign in with password
-    await login(email, password);
-
-    // Step 2: Check if 2FA is enabled
-    const profile = await loadProfile();
-    if (profile?.twofa_enabled) {
-      // Sign out and send OTP
-      await supabase.auth.signOut();
-      await sendOTP(email);
-      $('twofaCode').value = '';
-      $('twofaError').textContent = '';
-      showScreen('twofa');
-      LS.set('2fa_email', email);
-      return;
-    }
-
-    // Step 3: Load profile and go to home
-    await loadProfile();
-    LS.set('session', true);
+    await saveQuestions(username, answers);
+    const encKey = LS.get('reg_enc_key');
+    LS.set('session_key', encKey);
+    LS.set('session_user', username);
+    LS.del('reg_enc_key');
+    LS.del('reg_username');
+    LS.del('reg_display_name');
+    LS.del('reg_password');
+    currentUser = { id: username, username, display_name: LS.get('reg_display_name') || username, avatar_url: null };
+    toast('Аккаунт создан!');
     showScreen('home');
     renderChatList();
-    initPeer(currentUser.id.slice(0, 8));
+    initPeer(username.slice(0, 8));
+  } catch (e) {
+    $('reg3Error').textContent = e.message;
+  }
+};
+
+// Login
+$('loginBtn').onclick = async () => {
+  const username = $('loginUsername').value.trim().toLowerCase();
+  const password = $('loginPassword').value;
+  if (!username || !password) return $('loginError').textContent = 'Введите username и пароль';
+  $('loginError').textContent = '';
+  try {
+    await loginUser(username, password);
+    await loadProfile();
+    showScreen('home');
+    renderChatList();
+    initPeer(username.slice(0, 8));
   } catch (e) {
     $('loginError').textContent = e.message;
   }
 };
 
-// 2FA handler
-$('twofaBtn').onclick = async () => {
-  const code = $('twofaCode').value.trim();
-  const email = LS.get('2fa_email');
-  if (!code || code.length !== 6) return $('twofaError').textContent = 'Введи 6-значный код';
-  $('twofaError').textContent = '';
+// Recovery step 1: enter username
+let recoverData = null;
+
+$('recover1Btn').onclick = async () => {
+  const username = $('recoverUsername').value.trim().toLowerCase();
+  if (!username) return $('rec1Error').textContent = 'Введите username';
+  $('rec1Error').textContent = '';
   try {
-    await verifyOTP(email, code);
-    LS.del('2fa_email');
-    await loadProfile();
-    LS.set('session', true);
-    showScreen('home');
-    renderChatList();
-    initPeer(currentUser.id.slice(0, 8));
+    recoverData = await loadUserForRecovery(username);
+    renderRecoverQuestions(recoverData.questions);
+    showScreen('recover2');
   } catch (e) {
-    $('twofaError').textContent = 'Неверный код';
+    $('rec1Error').textContent = e.message;
+  }
+};
+
+function renderRecoverQuestions(questions) {
+  const container = $('recoverQuestionsContainer');
+  container.innerHTML = questions.map((q, i) => `
+    <div class="question-item">
+      <label>${q.q}</label>
+      <div class="input-wrap">
+        <input type="text" class="recover-answer-input" data-idx="${i}" placeholder="Ответ..." autocomplete="off">
+      </div>
+    </div>
+  `).join('');
+}
+
+$('recover2Btn').onclick = async () => {
+  const inputs = document.querySelectorAll('.recover-answer-input');
+  const answers = Array.from(inputs).map(inp => inp.value.trim());
+  if (answers.some(a => !a)) return $('rec2Error').textContent = 'Заполни все ответы';
+  $('rec2Error').textContent = '';
+  try {
+    const key = await recoverKey(recoverData.username, answers);
+    $('recoveredKeyDisplay').textContent = key;
+    showScreen('recover3');
+  } catch (e) {
+    $('rec2Error').textContent = e.message;
+  }
+};
+
+$('copyRecoveredKeyBtn').onclick = () => {
+  const key = $('recoveredKeyDisplay').textContent;
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(key).then(() => toast('Ключ скопирован'));
+  } else {
+    const range = document.createRange();
+    range.selectNode($('recoveredKeyDisplay'));
+    window.getSelection().removeAllRanges();
+    window.getSelection().addRange(range);
+    document.execCommand('copy');
+    toast('Ключ скопирован');
   }
 };
 
@@ -720,16 +927,14 @@ $('twofaBtn').onclick = async () => {
 (async () => {
   try {
     if (await loadSupabaseConfig()) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const profile = await loadProfile();
-        if (profile) {
-          LS.set('session', true);
-          showScreen('home');
-          renderChatList();
-          initPeer(currentUser.id.slice(0, 8));
-          return;
-        }
+      const sessionUser = LS.get('session_user');
+      const sessionKey = LS.get('session_key');
+      if (sessionUser && sessionKey) {
+        await loadProfile();
+        showScreen('home');
+        renderChatList();
+        initPeer(sessionUser.slice(0, 8));
+        return;
       }
     }
   } catch {}
@@ -742,27 +947,13 @@ $('profileBtn').onclick = async () => {
   if (!p) return;
   $('profileUsername').textContent = '@' + p.username;
   $('profileDisplayName').value = p.display_name || '';
-  const { data: { user } } = await supabase.auth.getUser();
-  $('profileEmail').textContent = user?.email || '';
-  $('twofaToggle').checked = p.twofa_enabled || false;
-  $('twofaStatus').textContent = p.twofa_enabled ? 'Вкл' : 'Выкл';
-  const avatarImg = $('profileAvatar').querySelector('img');
-  const avatarIcon = $('profileAvatar').querySelector('svg');
-  const url = formatAvatarUrl(p.avatar_url);
-  if (url) {
-    if (!avatarImg) {
-      const img = document.createElement('img');
-      $('profileAvatar').appendChild(img);
-    }
-    $('profileAvatar').querySelector('img').src = url;
-    $('profileAvatar').querySelector('img').style.display = 'block';
-    if (avatarIcon) avatarIcon.style.display = 'none';
-  } else {
-    const img = $('profileAvatar').querySelector('img');
-    if (img) img.style.display = 'none';
-    if (avatarIcon) avatarIcon.style.display = 'block';
-  }
   showScreen('profile');
+};
+
+$('showKeyBtn').onclick = () => {
+  const key = LS.get('session_key');
+  if (!key) return toast('Ключ не найден');
+  toast('Ключ: ' + key.slice(0, 20) + '... (сохранён в сессии)');
 };
 
 $('saveDisplayNameBtn').onclick = async () => {
@@ -773,18 +964,6 @@ $('saveDisplayNameBtn').onclick = async () => {
     toast('Имя обновлено');
   } catch (e) {
     toast('Ошибка: ' + e.message);
-  }
-};
-
-$('changeAvatarBtn').onclick = () => $('avatarFileInput').click();
-$('avatarFileInput').onchange = async (e) => {
-  if (!e.target.files[0]) return;
-  try {
-    await updateAvatar(e.target.files[0]);
-    toast('Аватар обновлён');
-    $('avatarFileInput').value = '';
-  } catch (err) {
-    toast('Ошибка загрузки');
   }
 };
 
@@ -800,19 +979,11 @@ $('changePasswordBtn').onclick = async () => {
   }
 };
 
-$('twofaToggle').onchange = async () => {
-  const enabled = $('twofaToggle').checked;
-  try {
-    await toggle2FA(enabled);
-    $('twofaStatus').textContent = enabled ? 'Вкл' : 'Выкл';
-    toast(enabled ? '2FA включена' : '2FA выключена');
-  } catch (e) {
-    $('twofaToggle').checked = !enabled;
-    toast('Ошибка');
-  }
-};
-
 $('logoutBtn').onclick = logout;
+
+// remove avatar-related handlers since they're not used
+$('changeAvatarBtn') && ($('changeAvatarBtn').onclick = null);
+$('avatarFileInput') && ($('avatarFileInput').onchange = null);
 
 // -- Search --
 $('findUsersBtn').onclick = () => {

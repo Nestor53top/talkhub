@@ -64,43 +64,26 @@
     </div>
     <div class="screen-body">
       <div class="input-wrap">
-        <input type="email" id="loginEmail" placeholder="Email" autocomplete="email">
+        <input type="text" id="loginUsername" placeholder="Username" autocomplete="username">
       </div>
       <div class="input-wrap">
         <input type="password" id="loginPassword" placeholder="Пароль" autocomplete="current-password">
       </div>
       <button class="btn primary" id="loginBtn">Войти</button>
+      <button class="btn ghost" id="forgotKeyBtn" style="margin-top:8px">Забыли ключ шифрования?</button>
       <p class="form-error" id="loginError"></p>
     </div>
   </div>
 
-  <!-- 2FA -->
-  <div id="twofa" class="screen">
+  <!-- REGISTER STEP 1: username + password -->
+  <div id="register1" class="screen">
     <div class="screen-header">
-      <span class="screen-title">Двухфакторная проверка</span>
-    </div>
-    <div class="screen-body">
-      <p class="hint">Код отправлен на твою почту. Введи его ниже.</p>
-      <div class="input-wrap">
-        <input type="text" id="twofaCode" placeholder="6-значный код" maxlength="6" inputmode="numeric">
-      </div>
-      <button class="btn primary" id="twofaBtn">Подтвердить</button>
-      <p class="form-error" id="twofaError"></p>
-    </div>
-  </div>
-
-  <!-- REGISTER -->
-  <div id="register" class="screen">
-    <div class="screen-header">
-      <button class="icon-btn" id="backFromRegisterBtn">
+      <button class="icon-btn" id="backFromRegister1Btn">
         <svg viewBox="0 0 24 24" width="24" height="24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
       <span class="screen-title">Регистрация</span>
     </div>
     <div class="screen-body">
-      <div class="input-wrap">
-        <input type="email" id="regEmail" placeholder="Email" autocomplete="email">
-      </div>
       <div class="input-wrap">
         <input type="text" id="regUsername" placeholder="Username (уникальный)" maxlength="20" autocomplete="off">
       </div>
@@ -110,19 +93,88 @@
       <div class="input-wrap">
         <input type="password" id="regPassword" placeholder="Пароль (мин. 6 символов)" autocomplete="new-password">
       </div>
-      <button class="btn primary" id="registerBtn">Создать аккаунт</button>
-      <p class="form-error" id="regError"></p>
+      <button class="btn primary" id="register1Btn">Создать аккаунт</button>
+      <p class="form-error" id="reg1Error"></p>
     </div>
   </div>
 
-  <!-- VERIFY EMAIL -->
-  <div id="verify" class="screen">
+  <!-- REGISTER STEP 2: show encryption key -->
+  <div id="register2" class="screen">
+    <div class="screen-header">
+      <span class="screen-title">Ключ шифрования</span>
+    </div>
     <div class="screen-body center">
-      <svg viewBox="0 0 24 24" width="64" height="64"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" fill="none" stroke="#dc2626" stroke-width="2"/><path d="M22 6l-10 7L2 6" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <h2>Проверь почту</h2>
-      <p class="hint">Мы отправили письмо с подтверждением. Перейди по ссылке в письме, затем нажми ниже.</p>
-      <button class="btn primary" id="checkVerificationBtn">Я подтвердил</button>
-      <button class="btn ghost" id="resendVerificationBtn">Отправить снова</button>
+      <svg viewBox="0 0 24 24" width="48" height="48"><path d="M12 2C8.13 2 5 5.13 5 9v3H3v10h18V12h-2V9c0-3.87-3.13-7-7-7z" fill="none" stroke="#dc2626" stroke-width="2"/><circle cx="12" cy="15" r="2" fill="#dc2626"/><path d="M12 17v3" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round"/></svg>
+      <h2>Твой ключ шифрования</h2>
+      <p class="hint">Сохрани этот ключ в надёжном месте! Он нужен для восстановления доступа.</p>
+      <div class="key-display" id="encryptionKeyDisplay"></div>
+      <button class="btn primary" id="copyKeyBtn">Скопировать ключ</button>
+      <button class="btn secondary" id="keyNextBtn">Я сохранил, далее</button>
+    </div>
+  </div>
+
+  <!-- REGISTER STEP 3: security questions -->
+  <div id="register3" class="screen">
+    <div class="screen-header">
+      <span class="screen-title">Вопросы безопасности</span>
+    </div>
+    <div class="screen-body">
+      <p class="hint">Ответь на вопросы. Они помогут восстановить ключ, если забудешь пароль.</p>
+      <div id="questionsContainer"></div>
+      <button class="btn primary" id="register3Btn">Завершить</button>
+      <p class="form-error" id="reg3Error"></p>
+    </div>
+  </div>
+
+  <!-- RECOVER STEP 1: enter username -->
+  <div id="recover1" class="screen">
+    <div class="screen-header">
+      <button class="icon-btn" id="backFromRecover1Btn">
+        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="screen-title">Восстановление ключа</span>
+    </div>
+    <div class="screen-body">
+      <p class="hint">Введи username, чтобы ответить на вопросы безопасности.</p>
+      <div class="input-wrap">
+        <input type="text" id="recoverUsername" placeholder="Username" autocomplete="off">
+      </div>
+      <button class="btn primary" id="recover1Btn">Далее</button>
+      <p class="form-error" id="rec1Error"></p>
+    </div>
+  </div>
+
+  <!-- RECOVER STEP 2: answer questions -->
+  <div id="recover2" class="screen">
+    <div class="screen-header">
+      <button class="icon-btn" id="backFromRecover2Btn">
+        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="screen-title">Ответь на вопросы</span>
+    </div>
+    <div class="screen-body">
+      <p class="hint">Ответь правильно минимум на 3 из 5 вопросов.</p>
+      <div id="recoverQuestionsContainer"></div>
+      <button class="btn primary" id="recover2Btn">Проверить</button>
+      <p class="form-error" id="rec2Error"></p>
+    </div>
+  </div>
+
+  <!-- RECOVER STEP 3: show recovered key -->
+  <div id="recover3" class="screen">
+    <div class="screen-header">
+      <button class="icon-btn" id="backFromRecover3Btn">
+        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <span class="screen-title">Ключ восстановлен</span>
+    </div>
+    <div class="screen-body center">
+      <svg viewBox="0 0 24 24" width="48" height="48"><path d="M22 11.08V12a10 10 0 11-5.93-9.14" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round"/><path d="M22 4L12 14.01l-3-3" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <h2>Ключ восстановлен</h2>
+      <p class="hint">Скопируй ключ и используй его для входа.</p>
+      <div class="key-display" id="recoveredKeyDisplay"></div>
+      <button class="btn primary" id="copyRecoveredKeyBtn">Скопировать ключ</button>
+      <button class="btn secondary" id="goToLoginFromRecoverBtn">Войти</button>
     </div>
   </div>
 
@@ -220,17 +272,9 @@
         </div>
       </div>
       <div class="profile-field">
-        <label>Email</label>
-        <div class="profile-value" id="profileEmail">email@example.com</div>
-      </div>
-      <div class="profile-field">
-        <label>Двухфакторная аутентификация</label>
+        <label>Ключ шифрования</label>
         <div class="profile-edit-row">
-          <label class="toggle">
-            <input type="checkbox" id="twofaToggle">
-            <span class="toggle-slider"></span>
-          </label>
-          <span id="twofaStatus">Выкл</span>
+          <button class="btn ghost small" id="showKeyBtn">Показать ключ</button>
         </div>
       </div>
       <div class="profile-field">
