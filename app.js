@@ -163,21 +163,25 @@ function renderMessage(msg, isTheirs) {
 }
 
 // --- Join ---
-$('joinBtn').onclick = async () => {
-  const nick = $('joinNick').value.trim();
-  const key = $('joinKey').value.trim();
-  if (!nick || !key) return $('joinError').textContent = 'Введи ник и ключ';
-  $('joinError').textContent = '';
+async function doJoin(nick, key) {
   localStorage.setItem('th_last_nick', nick);
   localStorage.setItem('th_last_key', key);
   myNick = nick;
   roomHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key))))
     .slice(0, 12).map(b => b.toString(16).padStart(2, '0')).join('');
-  $('chatScreenName').textContent = 'Комната: ' + nick;
+  $('chatScreenName').textContent = 'Комната';
   $('chatMessages').innerHTML = '';
   loadMsgs().forEach(m => renderMessage(m, m.nick !== myNick));
   showScreen('chat');
   tryClaimSlot(0);
+}
+
+$('joinBtn').onclick = async () => {
+  const nick = $('joinNick').value.trim();
+  const key = $('joinKey').value.trim();
+  if (!nick || !key) return $('joinError').textContent = 'Введи ник и ключ';
+  $('joinError').textContent = '';
+  doJoin(nick, key);
 };
 
 $('leaveBtn').onclick = () => {
@@ -251,8 +255,13 @@ let micOn = true, camOn = true;
 $('callMicBtn').onclick = () => { if (!localStream) return; const t = localStream.getAudioTracks()[0]; if (t) { t.enabled = !t.enabled; micOn = t.enabled; $('callMicBtn').querySelector('svg').style.opacity = micOn ? '1' : '0.4'; } };
 $('callCamBtn').onclick = () => { if (!localStream) return; const t = localStream.getVideoTracks()[0]; if (t) { t.enabled = !t.enabled; camOn = t.enabled; $('callCamBtn').querySelector('svg').style.opacity = camOn ? '1' : '0.4'; } };
 
-// --- Restore last session ---
-const prevNick = localStorage.getItem('th_last_nick');
-const prevKey = localStorage.getItem('th_last_key');
-if (prevNick && prevKey) { $('joinNick').value = prevNick; $('joinKey').value = prevKey; }
-showScreen('join');
+// --- Auto-join or show join screen ---
+(async () => {
+  const prevNick = localStorage.getItem('th_last_nick');
+  const prevKey = localStorage.getItem('th_last_key');
+  if (prevNick && prevKey) {
+    doJoin(prevNick, prevKey);
+  } else {
+    showScreen('join');
+  }
+})();
