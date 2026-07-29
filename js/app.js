@@ -11,30 +11,23 @@ TH.timeStr = function(t) {
 };
 TH.toast = function(msg) {
   const el = document.getElementById('joinError');
-  el.textContent = msg;
-  setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 4000);
+  if (el) el.textContent = msg;
+  console.log('[toast]', msg);
+  setTimeout(() => { if (el && el.textContent === msg) el.textContent = ''; }, 4000);
 };
 TH.sha256 = async function(str) {
+  if (!window.crypto?.subtle) {
+    return str.split('').reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0).toString(16).slice(0, 12);
+  }
   const buf = new TextEncoder().encode(str);
   const hash = await crypto.subtle.digest('SHA-256', buf);
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('').slice(0, 12);
 };
 TH.showScreen = function(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
+  const el = document.getElementById(id);
+  if (el) el.classList.add('active');
 };
-
-/* Auto-join on page load */
-(async function() {
-  const nick = localStorage.getItem('th_last_nick');
-  const key = localStorage.getItem('th_last_key');
-  if (nick && key) {
-    const hash = await TH.sha256(key);
-    document.getElementById('nickInput').value = nick;
-    document.getElementById('keyInput').value = key;
-    TH.joinRoom(nick, hash);
-  }
-})();
 
 /* DOM refs */
 let $ = id => document.getElementById(id);
@@ -42,16 +35,41 @@ const nickInp = $('nickInput'), keyInp = $('keyInput'), joinBtn = $('joinBtn');
 const msgInp = $('msgInput'), sendBtn = $('sendBtn'), fileInp = $('fileInput');
 const menuBtn = $('menuBtn'), menuDropdown = $('menuDropdown');
 const voiceBtn = $('voiceBtn'), endCallBtn = $('endCallBtn');
+const joinError = $('joinError');
+
+/* Auto-join on page load */
+(async function() {
+  try {
+    const nick = localStorage.getItem('th_last_nick');
+    const key = localStorage.getItem('th_last_key');
+    if (nick && key) {
+      document.getElementById('nickInput').value = nick;
+      document.getElementById('keyInput').value = key;
+      const hash = await TH.sha256(key);
+      TH.joinRoom(nick, hash);
+    }
+  } catch (e) { console.error('autojoin err', e); }
+})();
 
 /* Join */
 joinBtn.addEventListener('click', async () => {
-  const nick = nickInp.value.trim() || 'Аноним';
-  const key = keyInp.value.trim();
-  if (!key) { TH.toast('Введи ключ комнаты'); return; }
-  const hash = await TH.sha256(key);
-  localStorage.setItem('th_last_nick', nick);
-  localStorage.setItem('th_last_key', key);
-  TH.joinRoom(nick, hash);
+  try {
+    const nick = nickInp.value.trim() || 'Аноним';
+    const key = keyInp.value.trim();
+    if (!key) { TH.toast('Введи ключ комнаты'); return; }
+    console.log('join: nick=%s key=%s', nick, key);
+    const hash = await TH.sha256(key);
+    localStorage.setItem('th_last_nick', nick);
+    localStorage.setItem('th_last_key', key);
+    TH.joinRoom(nick, hash);
+  } catch (e) { console.error('join err', e); TH.toast('Ошибка: ' + e.message); }
+});
+
+/* Enter on join inputs */
+[nickInp, keyInp].forEach(inp => {
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); joinBtn.click(); }
+  });
 });
 
 /* Send on Enter */
