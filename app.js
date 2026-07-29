@@ -192,12 +192,16 @@ function initPeer(id, creatorName, isCreator) {
     },
   });
 
+  peer._resolveOpen = null;
+  peer._openPromise = new Promise(r => { peer._resolveOpen = r; });
+
   peer.on('open', (id) => {
     console.log('Peer ID:', id);
     if (isCreator) {
       $('roomKeyDisplay').textContent = id;
       showScreen('roomCreated');
     }
+    if (peer._resolveOpen) peer._resolveOpen();
   });
 
   peer.on('connection', (incoming) => {
@@ -219,11 +223,21 @@ function initPeer(id, creatorName, isCreator) {
   });
 
   peer.on('error', (err) => {
+    console.error('PeerJS error:', err.type, err.message);
     if (err.type === 'peer-unavailable') {
       toast('Ключ недействителен или собеседник не в сети');
+    } else if (err.type === 'unavailable-id') {
+      toast('Этот ключ уже используется');
+    } else if (err.type === 'network') {
+      toast('Нет соединения с сервером PeerJS');
+      $('connectionStatus').textContent = 'Нет сети';
     } else if (err.type !== 'disconnected') {
-      console.error(err);
+      toast('Ошибка: ' + (err.message || err.type));
     }
+  });
+
+  peer.on('close', () => {
+    toast('Соединение с PeerJS закрыто');
   });
 }
 
@@ -245,6 +259,8 @@ function setupConnection(c) {
       const msg = `${data.name} присоединился`;
       addMessage(msg, 'system');
       toast(msg);
+      showScreen('chat');
+      $('chatRoomKey').textContent = myPeerId;
     } else if (data.type === 'text') {
       addMessage(data.text, 'theirs', { name: data.name });
     } else if (data.type === 'file') {
@@ -296,19 +312,11 @@ async function joinRoom(key, name) {
   remotePeerId = key;
   initPeer(null, name, false);
 
-  // Wait for peer to be ready, then connect
-  await new Promise((resolve) => {
-    const check = () => {
-      if (peer && peer.open) resolve();
-      else setTimeout(check, 100);
-    };
-    check();
-  });
+  await (peer._openPromise || Promise.resolve());
 
   conn = peer.connect(key, { reliable: true });
   setupConnection(conn);
 
-  // Send our info once connected
   conn.on('open', () => {
     conn.send({ type: 'connect-info', peerId: myPeerId, name: myName });
   });
