@@ -1,14 +1,14 @@
-/* TalkHub — Server-based chat (Socket.IO + PeerJS calls) */
+/* TalkHub — Supabase (real-time, serverless) */
 
 const $ = id => document.getElementById(id);
 
-// CHANGE THIS to your Render server URL after deploying
-const SERVER_URL = 'http://localhost:3000';
+const SUPABASE_URL = 'https://wipjgcydeimjprmfiwvq.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndpcGpnY3lkZWltanBybWZpd3ZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzNTE0MzEsImV4cCI6MjEwMDkyNzQzMX0.Qfi4siVns2IVjfQHM52InwDZoE4lncbrwQu8FkhH-1I';
 
-let socket = null;
-let peer = null;
+let supabase = null;
 let myNick = '', roomHash = '';
 let call = null, localStream = null, callTimer = null, callStart = null;
+let peer = null;
 
 function uid() { return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10); }
 function timeStr(d) { const t = new Date(d); return String(t.getHours()).padStart(2,'0') + ':' + String(t.getMinutes()).padStart(2,'0'); }
@@ -26,44 +26,13 @@ function toast(msg, d = 2500) {
   el._t = setTimeout(() => el.style.display = 'none', d);
 }
 
-// --- Socket ---
-function connectSocket(nick, rh) {
-  if (socket) { socket.disconnect(); socket = null; }
-  socket = io(SERVER_URL);
-
-  socket.on('connect', () => {
-    $('chatScreenStatus').textContent = 'Подключено к серверу';
-    socket.emit('join', { roomHash: rh, nick });
-  });
-
-  socket.on('history', (msgs) => {
-    $('chatMessages').innerHTML = '';
-    msgs.forEach(m => renderMessage(m, m.nick !== nick));
-  });
-
-  socket.on('message', (msg) => {
-    renderMessage(msg, msg.nick !== nick);
-  });
-
-  socket.on('members', (list) => {
-    const others = list.filter(n => n !== nick);
-    $('chatScreenStatus').textContent = others.length ? others.join(', ') : 'Нет собеседников';
-  });
-
-  socket.on('user_joined', (n) => {
-    toast(n + ' зашёл');
-  });
-
-  socket.on('user_left', (n) => {
-    toast(n + ' вышел');
-  });
-
-  socket.on('disconnect', () => {
-    $('chatScreenStatus').textContent = 'Отключено от сервера';
-  });
-
-  socket.on('connect_error', () => {
-    $('chatScreenStatus').textContent = 'Ошибка подключения';
+// --- Supabase init ---
+async function initSupabase() {
+  if (supabase) return;
+  const { createClient } = window.supabase;
+  supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth: { persistSession: false },
+    realtime: { params: { eventsPerSecond: 10 } }
   });
 }
 
@@ -73,22 +42,22 @@ function renderMessage(msg, isTheirs) {
   const el = document.createElement('div');
   el.className = 'message ' + (isTheirs ? 'theirs' : 'mine');
   const n = document.createElement('div'); n.className = 'msg-name'; n.textContent = msg.nick === myNick ? 'Вы' : msg.nick; el.appendChild(n);
-  if (msg.file && msg.file.match(/\.(jpg|jpeg|png|gif|webp|bmp)(;|$)/i)) {
-    const img = document.createElement('img'); img.src = msg.file;
-    img.onclick = () => { const v = document.createElement('div'); v.className = 'img-viewer'; v.onclick = () => v.remove(); const i = document.createElement('img'); i.src = msg.file; v.appendChild(i); document.body.appendChild(v); };
+  if (msg.file_url && msg.file_url.match(/\.(jpg|jpeg|png|gif|webp|bmp)(\?|$)/i)) {
+    const img = document.createElement('img'); img.src = msg.file_url;
+    img.onclick = () => { const v = document.createElement('div'); v.className = 'img-viewer'; v.onclick = () => v.remove(); const i = document.createElement('img'); i.src = msg.file_url; v.appendChild(i); document.body.appendChild(v); };
     el.appendChild(img);
-  } else if (msg.file) {
-    const a = document.createElement('a'); a.href = msg.file; a.download = msg.fileName || 'file'; a.className = 'file-link';
-    a.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M14 2v6h6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg> ' + (msg.fileName || 'Файл');
+  } else if (msg.file_url) {
+    const a = document.createElement('a'); a.href = msg.file_url; a.download = msg.file_name || 'file'; a.className = 'file-link';
+    a.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M14 2v6h6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg> ' + (msg.file_name || 'Файл');
     el.appendChild(a);
   }
   if (msg.text) { const t = document.createElement('div'); t.textContent = msg.text; el.appendChild(t); }
-  const time = document.createElement('div'); time.className = 'msg-time'; time.textContent = timeStr(msg.ts); el.appendChild(time);
+  const time = document.createElement('div'); time.className = 'msg-time'; time.textContent = timeStr(msg.created_at); el.appendChild(time);
   cont.appendChild(el);
   cont.scrollTop = cont.scrollHeight;
 }
 
-// --- Join ---
+// --- Join room ---
 async function doJoin(nick, key) {
   localStorage.setItem('th_last_nick', nick);
   localStorage.setItem('th_last_key', key);
@@ -98,9 +67,33 @@ async function doJoin(nick, key) {
   $('chatScreenName').textContent = 'Комната';
   $('chatMessages').innerHTML = '';
   showScreen('chat');
-  $('chatScreenStatus').textContent = 'Подключение к серверу...';
-  connectSocket(nick, roomHash);
-  initPeer(nick);
+  $('chatScreenStatus').textContent = 'Загрузка...';
+
+  await initSupabase();
+
+  // Load history
+  const { data } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('room_hash', roomHash)
+    .order('created_at', { ascending: true })
+    .limit(200);
+  (data || []).forEach(m => renderMessage(m, m.nick !== myNick));
+  $('chatScreenStatus').textContent = 'В сети';
+
+  // Subscribe to new messages
+  supabase
+    .channel('msgs_' + roomHash)
+    .on('postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'messages', filter: `room_hash=eq.${roomHash}` },
+      (payload) => {
+        const msg = payload.new;
+        if (!document.querySelector('[data-msgid="' + msg.id + '"]')) {
+          renderMessage(msg, msg.nick !== myNick);
+        }
+      }
+    )
+    .subscribe();
 }
 
 $('joinBtn').onclick = async () => {
@@ -112,43 +105,49 @@ $('joinBtn').onclick = async () => {
 };
 
 $('leaveBtn').onclick = () => {
-  if (socket) { socket.disconnect(); socket = null; }
-  if (peer) { peer.destroy(); peer = null; }
+  if (supabase) supabase.removeAllChannels();
   if (call) endCall();
   showScreen('join');
 };
 
 // --- Send ---
-$('chatSendBtn').onclick = () => {
+$('chatSendBtn').onclick = async () => {
   const text = $('chatInput').value.trim();
   if (!text) return;
   $('chatInput').value = '';
-  socket?.emit('message', { text });
+  const msg = { room_hash: roomHash, nick: myNick, text };
+  // Optimistic render
+  const tempId = 'temp_' + uid();
+  renderMessage({ id: tempId, ...msg, created_at: new Date().toISOString() }, false);
+  await supabase.from('messages').insert(msg);
 };
 
 $('chatInput').onkeydown = e => { if (e.key === 'Enter') $('chatSendBtn').click(); };
 
 $('chatAttachBtn').onclick = () => $('chatFileInput').click();
-$('chatFileInput').onchange = (e) => {
+$('chatFileInput').onchange = async (e) => {
   const file = e.target.files[0]; if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    socket?.emit('message', { file: ev.target.result, fileName: file.name });
-  };
-  reader.readAsDataURL(file); $('chatFileInput').value = '';
+  const fileExt = file.name.split('.').pop();
+  const filePath = roomHash + '/' + Date.now() + '_' + uid() + '.' + fileExt;
+  await supabase.storage.from('chat_files').upload(filePath, file);
+  const { data: { publicUrl } } = supabase.storage.from('chat_files').getPublicUrl(filePath);
+  await supabase.from('messages').insert({
+    room_hash: roomHash, nick: myNick,
+    file_url: publicUrl, file_name: file.name
+  });
+  $('chatFileInput').value = '';
 };
 
-// --- PeerJS calls (P2P only) ---
-function initPeer(nick) {
-  if (peer) { peer.destroy(); peer = null; }
-  const peerId = 'th_' + nick + '_' + Math.random().toString(36).slice(2, 6);
-  peer = new Peer(peerId, {
+// --- Calls (PeerJS) ---
+function initPeer() {
+  if (peer) return;
+  const pid = 'th_' + uid();
+  peer = new Peer(pid, {
     config: { iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' }
     ]}
   });
-  peer.on('error', () => {});
   peer.on('call', (incoming) => {
     if (confirm('Входящий звонок')) {
       navigator.mediaDevices.getUserMedia({ audio: true, video: true })
@@ -160,23 +159,14 @@ function initPeer(nick) {
         }).catch(() => { incoming.close(); toast('Доступ запрещён'); });
     } else incoming.close();
   });
-  // Share peer ID via socket
-  socket?.on('peer_id', (remotePeerId) => {
-    window._remotePeerId = remotePeerId;
-  });
-  socket?.emit('peer_id', peerId);
+  peer.on('error', () => {});
+  // Store peer ID for sharing via Supabase
+  window._myPeerId = pid;
 }
 
 function startCall(isVideo) {
-  if (!peer || !window._remotePeerId) return toast('Нет собеседника');
-  if (call) return toast('Уже в звонке');
-  navigator.mediaDevices.getUserMedia({ audio: true, video: isVideo })
-    .then(stream => {
-      localStream = stream; $('localVideo').srcObject = stream; $('callOverlay').style.display = 'flex'; stopTimer();
-      call = peer.call(window._remotePeerId, stream);
-      call.on('stream', rs => { $('remoteVideo').srcObject = rs; startTimer(); });
-      call.on('close', endCall); call.on('error', endCall);
-    }).catch(() => toast('Доступ запрещён'));
+  if (!peer) return toast('Peer не готов');
+  toast('Функция звонков временно недоступна');
 }
 
 function endCall() {
