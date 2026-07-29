@@ -2,78 +2,102 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
 <title>TalkHub</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="app">
-  <div id="landing" class="screen active">
-    <div class="logo">TalkHub</div>
-    <p class="subtitle">Защищённое P2P общение</p>
-    <div class="landing-actions">
-      <button class="btn primary" id="createRoomBtn">Создать комнату</button>
-      <div class="divider"><span>или</span></div>
-      <div class="join-form">
-        <input type="text" id="joinKey" placeholder="Ключ комнаты" maxlength="8">
-        <input type="text" id="joinName" placeholder="Ваш ник" maxlength="20">
-        <button class="btn secondary" id="joinRoomBtn">Присоединиться</button>
+
+  <!-- JOIN -->
+  <div id="join" class="screen active">
+    <div class="landing-inner">
+      <svg class="logo-svg" viewBox="0 0 48 48" width="64" height="64">
+        <circle cx="24" cy="24" r="22" fill="none" stroke="#dc2626" stroke-width="2.5"/>
+        <path d="M16 20c0-4 4-6 8-6s8 2 8 6" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round"/>
+        <path d="M16 20v8c0 2 2 3 4 3h8c2 0 4-1 4-3v-8" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round"/>
+        <path d="M21 25l3 3 3-3" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M24 22v6" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <h1 class="logo-text">TalkHub</h1>
+      <p class="subtitle">Введи любой ключ — создашь комнату.<br>Друг с таким же ключом попадёт в неё.</p>
+      <div class="input-wrap" style="margin-bottom:12px">
+        <input type="text" id="joinNick" placeholder="Ваш ник" maxlength="20" autocomplete="off">
       </div>
+      <div class="input-wrap" style="margin-bottom:16px">
+        <input type="password" id="joinKey" placeholder="Ключ комнаты (общий с другом)" autocomplete="off">
+      </div>
+      <button class="btn primary" id="joinBtn">Войти</button>
+      <p class="form-error" id="joinError"></p>
     </div>
   </div>
 
-  <div id="roomCreated" class="screen">
-    <div class="logo small">TalkHub</div>
-    <h2>Комната создана!</h2>
-    <p class="share-text">Отправьте этот ключ собеседнику:</p>
-    <div class="key-display" id="roomKeyDisplay"></div>
-    <button class="btn primary" id="copyKeyBtn">Скопировать</button>
-    <p class="waiting-text">Ожидание подключения...</p>
-    <div class="spinner"></div>
-  </div>
-
+  <!-- CHAT -->
   <div id="chat" class="screen">
-    <div class="chat-header">
-      <div class="room-info">
-        <span class="room-label">Комната:</span>
-        <span id="chatRoomKey"></span>
+    <div class="chat-screen-header">
+      <button class="icon-btn" id="leaveBtn">
+        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="chat-screen-info">
+        <div class="chat-screen-name" id="chatScreenName">Комната</div>
+        <div class="chat-screen-status" id="chatScreenStatus">Подключение...</div>
       </div>
-      <div class="connection-status" id="connectionStatus">Подключение...</div>
+      <div class="chat-screen-actions">
+        <button class="icon-btn" id="chatVoiceBtn" title="Голосовой звонок">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button class="icon-btn" id="chatVideoBtn" title="Видеозвонок">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M23 7l-7 5 7 5V7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><rect x="1" y="5" width="15" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        </button>
+      </div>
     </div>
-    <div class="messages" id="messages"></div>
+    <div class="messages" id="chatMessages"></div>
     <div class="chat-input-area">
-      <div class="chat-controls">
-        <button class="icon-btn" id="photoBtn" title="Отправить фото">📷</button>
-        <button class="icon-btn" id="fileBtn" title="Отправить файл">📎</button>
-        <button class="icon-btn" id="voiceBtn" title="Голосовой звонок">🎤</button>
-        <button class="icon-btn" id="videoBtn" title="Видеозвонок">📹</button>
-      </div>
       <div class="message-input-row">
-        <input type="text" id="messageInput" placeholder="Сообщение..." maxlength="500">
-        <button class="btn primary" id="sendBtn">Отправить</button>
+        <button class="icon-btn" id="chatAttachBtn" title="Прикрепить">
+          <svg viewBox="0 0 24 24" width="22" height="22"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <input type="text" id="chatInput" placeholder="Сообщение..." maxlength="2000" autocomplete="off">
+        <button class="btn send-btn" id="chatSendBtn">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
       </div>
     </div>
-    <input type="file" id="fileInput" accept="image/*" capture="environment" style="display:none">
-    <input type="file" id="anyFileInput" style="display:none">
+    <input type="file" id="chatFileInput" style="display:none">
   </div>
 
+  <!-- CALL OVERLAY -->
   <div id="callOverlay" class="screen overlay" style="display:none">
     <div class="call-container">
       <div class="call-videos">
         <video id="remoteVideo" autoplay playsinline></video>
         <video id="localVideo" autoplay playsinline muted></video>
       </div>
-      <div class="call-controls">
-        <button class="icon-btn large" id="toggleMic">🔇</button>
-        <button class="icon-btn large danger" id="endCallBtn">📞</button>
-        <button class="icon-btn large" id="toggleCam">📷</button>
+      <div class="call-status-bar">
+        <span class="call-timer" id="callTimer">00:00</span>
       </div>
-      <div class="call-status" id="callStatus">В звонке</div>
+      <div class="call-controls">
+        <button class="call-btn" id="callMicBtn">
+          <svg viewBox="0 0 24 24" width="28" height="28"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 10v2a7 7 0 01-14 0v-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 19v4M8 23h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <span>Микрофон</span>
+        </button>
+        <button class="call-btn danger" id="endCallBtn">
+          <svg viewBox="0 0 24 24" width="32" height="32"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.362 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0122 16.92z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <span>Завершить</span>
+        </button>
+        <button class="call-btn" id="callCamBtn">
+          <svg viewBox="0 0 24 24" width="28" height="28"><path d="M23 7l-7 5 7 5V7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><rect x="1" y="5" width="15" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          <span>Камера</span>
+        </button>
+      </div>
     </div>
   </div>
+
 </div>
 
+<script src="app.js?v=6"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script src="app.js"></script>
 </body>
 </html>
