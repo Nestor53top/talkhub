@@ -27,10 +27,26 @@ function toast(msg, d = 2500) {
 }
 
 // --- Supabase init ---
+function waitForSupabase(ms = 15000) {
+  return new Promise((resolve, reject) => {
+    if (typeof window.supabase !== 'undefined' && window.supabase?.createClient) return resolve();
+    const start = Date.now();
+    const check = setInterval(() => {
+      if (typeof window.supabase !== 'undefined' && window.supabase?.createClient) {
+        clearInterval(check);
+        resolve();
+      } else if (Date.now() - start > ms) {
+        clearInterval(check);
+        reject(new Error('Supabase SDK не загрузился'));
+      }
+    }, 50);
+  });
+}
+
 async function initSupabase() {
   if (supabase) return;
-  const { createClient } = window.supabase;
-  supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
+  await waitForSupabase();
+  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
     auth: { persistSession: false },
     realtime: { params: { eventsPerSecond: 10 } }
   });
@@ -69,15 +85,22 @@ async function doJoin(nick, key) {
   showScreen('chat');
   $('chatScreenStatus').textContent = 'Загрузка...';
 
-  await initSupabase();
+  try {
+    await initSupabase();
+  } catch (e) {
+    $('chatScreenStatus').textContent = 'Ошибка: ' + e.message;
+    toast('Не удалось подключиться к серверу');
+    return;
+  }
 
   // Load history
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('messages')
     .select('*')
     .eq('room_hash', roomHash)
     .order('created_at', { ascending: true })
     .limit(200);
+  if (error) { toast('Ошибка загрузки: ' + error.message); $('chatScreenStatus').textContent = 'Ошибка'; return; }
   (data || []).forEach(m => renderMessage(m, m.nick !== myNick));
   $('chatScreenStatus').textContent = 'В сети';
 
@@ -113,28 +136,28 @@ $('leaveBtn').onclick = () => {
 // --- Send ---
 $('chatSendBtn').onclick = async () => {
   const text = $('chatInput').value.trim();
-  if (!text) return;
+  if (!text || !supabase) return;
   $('chatInput').value = '';
   const msg = { room_hash: roomHash, nick: myNick, text };
-  // Optimistic render
-  const tempId = 'temp_' + uid();
-  renderMessage({ id: tempId, ...msg, created_at: new Date().toISOString() }, false);
-  await supabase.from('messages').insert(msg);
+  const { error } = await supabase.from('messages').insert(msg);
+  if (error) toast('Ошибка: ' + error.message);
 };
 
 $('chatInput').onkeydown = e => { if (e.key === 'Enter') $('chatSendBtn').click(); };
 
 $('chatAttachBtn').onclick = () => $('chatFileInput').click();
 $('chatFileInput').onchange = async (e) => {
-  const file = e.target.files[0]; if (!file) return;
-  const fileExt = file.name.split('.').pop();
-  const filePath = roomHash + '/' + Date.now() + '_' + uid() + '.' + fileExt;
-  await supabase.storage.from('chat_files').upload(filePath, file);
-  const { data: { publicUrl } } = supabase.storage.from('chat_files').getPublicUrl(filePath);
-  await supabase.from('messages').insert({
-    room_hash: roomHash, nick: myNick,
-    file_url: publicUrl, file_name: file.name
-  });
+  const file = e.target.files[0]; if (!file || !supabase) return;
+  try {
+    const fileExt = file.name.split('.').pop();
+    const filePath = roomHash + '/' + Date.now() + '_' + uid() + '.' + fileExt;
+    await supabase.storage.from('chat_files').upload(filePath, file);
+    const { data: { publicUrl } } = supabase.storage.from('chat_files').getPublicUrl(filePath);
+    await supabase.from('messages').insert({
+      room_hash: roomHash, nick: myNick,
+      file_url: publicUrl, file_name: file.name
+    });
+  } catch (e) { toast('Ошибка файла: ' + e.message); }
   $('chatFileInput').value = '';
 };
 
