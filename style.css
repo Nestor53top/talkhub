@@ -1,0 +1,371 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0f0f1a;
+  color: #e0e0e0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+#app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.screen {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+}
+.screen.active {
+  display: flex;
+}
+
+.logo {
+  font-size: 3rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-align: center;
+  margin-top: 4rem;
+}
+.logo.small {
+  font-size: 1.5rem;
+  margin-top: 1rem;
+}
+
+.subtitle {
+  text-align: center;
+  color: #888;
+  margin-top: 0.5rem;
+}
+
+.landing-actions {
+  margin: 3rem auto;
+  width: 100%;
+  max-width: 360px;
+  padding: 0 1rem;
+}
+
+.btn {
+  padding: 0.8rem 2rem;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s;
+  width: 100%;
+}
+.btn.primary {
+  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  color: #fff;
+}
+.btn.primary:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+.btn.secondary {
+  background: #1e1e32;
+  color: #e0e0e0;
+  border: 1px solid #333;
+}
+.btn.secondary:hover {
+  background: #2a2a44;
+}
+
+.divider {
+  text-align: center;
+  margin: 1.5rem 0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.divider::before, .divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #333;
+}
+.divider span {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.join-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+input {
+  padding: 0.8rem 1rem;
+  border: 1px solid #333;
+  border-radius: 10px;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  font-size: 1rem;
+  outline: none;
+  transition: 0.2s;
+}
+input:focus {
+  border-color: #7c3aed;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+}
+
+.share-text {
+  text-align: center;
+  margin-top: 2rem;
+  color: #888;
+}
+
+.key-display {
+  text-align: center;
+  font-size: 2.5rem;
+  font-weight: 800;
+  letter-spacing: 0.5rem;
+  color: #7c3aed;
+  background: #1a1a2e;
+  border: 2px dashed #333;
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin: 1rem auto;
+  width: 90%;
+  max-width: 300px;
+  user-select: all;
+}
+
+.waiting-text {
+  text-align: center;
+  color: #888;
+  margin-top: 2rem;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #1e1e32;
+  border-top-color: #7c3aed;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 1.5rem auto;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Chat */
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.8rem 1rem;
+  background: #1a1a2e;
+  border-bottom: 1px solid #333;
+}
+.room-label {
+  color: #888;
+  font-size: 0.85rem;
+}
+.room-info span:last-child {
+  font-weight: 600;
+  color: #7c3aed;
+}
+.connection-status {
+  font-size: 0.8rem;
+  padding: 0.3rem 0.8rem;
+  border-radius: 20px;
+  background: #f59e0b20;
+  color: #f59e0b;
+}
+.connection-status.connected {
+  background: #10b98120;
+  color: #10b981;
+}
+.connection-status.disconnected {
+  background: #ef444420;
+  color: #ef4444;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.messages::-webkit-scrollbar {
+  width: 4px;
+}
+.messages::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 2px;
+}
+
+.message {
+  max-width: 80%;
+  padding: 0.6rem 1rem;
+  border-radius: 16px;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  word-wrap: break-word;
+}
+.message.mine {
+  align-self: flex-end;
+  background: linear-gradient(135deg, #7c3aed, #3b82f6);
+  border-bottom-right-radius: 4px;
+}
+.message.theirs {
+  align-self: flex-start;
+  background: #1e1e32;
+  border-bottom-left-radius: 4px;
+}
+.message.system {
+  align-self: center;
+  background: transparent;
+  color: #666;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.8rem;
+}
+.message .msg-name {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-bottom: 0.2rem;
+}
+.message .msg-time {
+  font-size: 0.65rem;
+  opacity: 0.5;
+  text-align: right;
+  margin-top: 0.2rem;
+}
+.message img {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.message .file-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+.chat-input-area {
+  border-top: 1px solid #333;
+  background: #1a1a2e;
+  padding: 0.5rem;
+}
+
+.chat-controls {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0 0.3rem;
+  margin-bottom: 0.3rem;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: 0.2s;
+}
+.icon-btn:hover {
+  background: #2a2a44;
+}
+.icon-btn.large {
+  font-size: 1.8rem;
+  padding: 0.6rem 1rem;
+}
+.icon-btn.danger {
+  color: #ef4444;
+}
+
+.message-input-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.message-input-row input {
+  flex: 1;
+}
+
+/* Call overlay */
+#callOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: #000;
+  z-index: 1000;
+}
+.call-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.call-videos {
+  flex: 1;
+  position: relative;
+}
+#remoteVideo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+#localVideo {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  width: 120px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 2px solid #333;
+}
+.call-controls {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  padding: 1.5rem;
+  background: #0f0f1a;
+}
+.call-status {
+  text-align: center;
+  padding: 0.5rem;
+  color: #888;
+  font-size: 0.9rem;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e1e32;
+  color: #e0e0e0;
+  padding: 0.8rem 1.5rem;
+  border-radius: 12px;
+  border: 1px solid #333;
+  z-index: 2000;
+  animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

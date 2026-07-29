@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TalkHub</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <div id="landing" class="screen active">
+    <div class="logo">TalkHub</div>
+    <p class="subtitle">Защищённое P2P общение</p>
+    <div class="landing-actions">
+      <button class="btn primary" id="createRoomBtn">Создать комнату</button>
+      <div class="divider"><span>или</span></div>
+      <div class="join-form">
+        <input type="text" id="joinKey" placeholder="Ключ комнаты" maxlength="8">
+        <input type="text" id="joinName" placeholder="Ваш ник" maxlength="20">
+        <button class="btn secondary" id="joinRoomBtn">Присоединиться</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="roomCreated" class="screen">
+    <div class="logo small">TalkHub</div>
+    <h2>Комната создана!</h2>
+    <p class="share-text">Отправьте этот ключ собеседнику:</p>
+    <div class="key-display" id="roomKeyDisplay"></div>
+    <button class="btn primary" id="copyKeyBtn">Скопировать</button>
+    <p class="waiting-text">Ожидание подключения...</p>
+    <div class="spinner"></div>
+  </div>
+
+  <div id="chat" class="screen">
+    <div class="chat-header">
+      <div class="room-info">
+        <span class="room-label">Комната:</span>
+        <span id="chatRoomKey"></span>
+      </div>
+      <div class="connection-status" id="connectionStatus">Подключение...</div>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div class="chat-input-area">
+      <div class="chat-controls">
+        <button class="icon-btn" id="photoBtn" title="Отправить фото">📷</button>
+        <button class="icon-btn" id="fileBtn" title="Отправить файл">📎</button>
+        <button class="icon-btn" id="voiceBtn" title="Голосовой звонок">🎤</button>
+        <button class="icon-btn" id="videoBtn" title="Видеозвонок">📹</button>
+      </div>
+      <div class="message-input-row">
+        <input type="text" id="messageInput" placeholder="Сообщение..." maxlength="500">
+        <button class="btn primary" id="sendBtn">Отправить</button>
+      </div>
+    </div>
+    <input type="file" id="fileInput" accept="image/*" capture="environment" style="display:none">
+    <input type="file" id="anyFileInput" style="display:none">
+  </div>
+
+  <div id="callOverlay" class="screen overlay" style="display:none">
+    <div class="call-container">
+      <div class="call-videos">
+        <video id="remoteVideo" autoplay playsinline></video>
+        <video id="localVideo" autoplay playsinline muted></video>
+      </div>
+      <div class="call-controls">
+        <button class="icon-btn large" id="toggleMic">🔇</button>
+        <button class="icon-btn large danger" id="endCallBtn">📞</button>
+        <button class="icon-btn large" id="toggleCam">📷</button>
+      </div>
+      <div class="call-status" id="callStatus">В звонке</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
