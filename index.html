@@ -10,8 +10,8 @@
 <body>
 <div id="app">
 
-  <!-- LANDING -->
-  <div id="landing" class="screen active">
+  <!-- JOIN -->
+  <div id="join" class="screen active">
     <div class="landing-inner">
       <svg class="logo-svg" viewBox="0 0 48 48" width="64" height="64">
         <circle cx="24" cy="24" r="22" fill="none" stroke="#dc2626" stroke-width="2.5"/>
@@ -21,118 +21,27 @@
         <path d="M24 22v6" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round"/>
       </svg>
       <h1 class="logo-text">TalkHub</h1>
-      <p class="subtitle">Защищённый мессенджер</p>
-      <div class="landing-actions">
-        <button class="btn primary" id="goLoginBtn">Войти</button>
-        <button class="btn secondary" id="goRegisterBtn">Создать аккаунт</button>
-
+      <p class="subtitle">Введите ник и ключ комнаты</p>
+      <div class="input-wrap" style="margin-bottom:12px">
+        <input type="text" id="joinNick" placeholder="Ваш ник" maxlength="20" autocomplete="off">
       </div>
-    </div>
-  </div>
-
-  <!-- LOGIN -->
-  <div id="login" class="screen">
-    <div class="screen-header">
-      <button class="icon-btn" id="backFromLoginBtn">
-        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-      <span class="screen-title">Вход</span>
-    </div>
-    <div class="screen-body">
-      <div class="input-wrap">
-        <input type="text" id="loginUsername" placeholder="Username" autocomplete="username">
+      <div class="input-wrap" style="margin-bottom:16px">
+        <input type="password" id="joinKey" placeholder="Ключ комнаты" autocomplete="off">
       </div>
-      <div class="input-wrap">
-        <input type="password" id="loginPassword" placeholder="Пароль" autocomplete="current-password">
-      </div>
-      <button class="btn primary" id="loginBtn">Войти</button>
-
-      <p class="form-error" id="loginError"></p>
-    </div>
-  </div>
-
-  <!-- REGISTER STEP 1: username + password -->
-  <div id="register1" class="screen">
-    <div class="screen-header">
-      <button class="icon-btn" id="backFromRegister1Btn">
-        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-      <span class="screen-title">Регистрация</span>
-    </div>
-    <div class="screen-body">
-      <div class="input-wrap">
-        <input type="text" id="regUsername" placeholder="Username (уникальный)" maxlength="20" autocomplete="off">
-      </div>
-      <div class="input-wrap">
-        <input type="text" id="regDisplayName" placeholder="Отображаемое имя" maxlength="30" autocomplete="off">
-      </div>
-      <div class="input-wrap">
-        <input type="password" id="regPassword" placeholder="Пароль (мин. 6 символов)" autocomplete="new-password">
-      </div>
-      <button class="btn primary" id="register1Btn">Создать аккаунт</button>
-      <p class="form-error" id="reg1Error"></p>
-    </div>
-  </div>
-
-  <!-- REGISTER STEP 2: show encryption key -->
-  <div id="register2" class="screen">
-    <div class="screen-header">
-      <span class="screen-title">Ключ шифрования</span>
-    </div>
-    <div class="screen-body center">
-      <svg viewBox="0 0 24 24" width="48" height="48"><path d="M12 2C8.13 2 5 5.13 5 9v3H3v10h18V12h-2V9c0-3.87-3.13-7-7-7z" fill="none" stroke="#dc2626" stroke-width="2"/><circle cx="12" cy="15" r="2" fill="#dc2626"/><path d="M12 17v3" fill="none" stroke="#dc2626" stroke-width="2" stroke-linecap="round"/></svg>
-      <h2>Твой ключ шифрования</h2>
-      <p class="hint">Сохрани этот ключ в надёжном месте! Он нужен для восстановления доступа.</p>
-      <div class="key-display" id="encryptionKeyDisplay"></div>
-      <button class="btn primary" id="copyKeyBtn">Скопировать ключ</button>
-      <button class="btn secondary" id="keyNextBtn">Я сохранил, далее</button>
-    </div>
-  </div>
-
-
-
-  <!-- HOME -->
-  <div id="home" class="screen">
-    <div class="home-header">
-      <div class="home-header-left">
-        <button class="icon-btn" id="profileBtn" title="Профиль">
-          <svg viewBox="0 0 24 24" width="24" height="24"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 22c0-6 4-10 8-10s8 4 8 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        </button>
-        <h1 class="home-title">TalkHub</h1>
-      </div>
-      <div class="home-header-right">
-        <button class="icon-btn" id="createGroupBtn" title="Создать группу">
-          <svg viewBox="0 0 24 24" width="24" height="24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        </button>
-        <button class="icon-btn" id="findUsersBtn" title="Найти пользователей">
-          <svg viewBox="0 0 24 24" width="24" height="24"><circle cx="11" cy="11" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M21 21l-4.3-4.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        </button>
-      </div>
-    </div>
-    <div class="search-bar" id="searchBar" style="display:none">
-      <div class="input-wrap">
-        <input type="text" id="searchInput" placeholder="Поиск пользователей..." autocomplete="off">
-      </div>
-      <div class="search-results" id="searchResults"></div>
-    </div>
-    <div class="chat-list" id="chatList">
-      <div class="empty-state" id="emptyChats">
-        <svg viewBox="0 0 24 24" width="48" height="48"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round"/></svg>
-        <p>Нет чатов</p>
-        <span>Найди пользователя или создай группу</span>
-      </div>
+      <button class="btn primary" id="joinBtn">Войти в комнату</button>
+      <p class="form-error" id="joinError"></p>
     </div>
   </div>
 
   <!-- CHAT -->
   <div id="chat" class="screen">
     <div class="chat-screen-header">
-      <button class="icon-btn" id="backFromChatBtn">
+      <button class="icon-btn" id="leaveBtn">
         <svg viewBox="0 0 24 24" width="24" height="24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
       <div class="chat-screen-info">
-        <div class="chat-screen-name" id="chatScreenName">Чат</div>
-        <div class="chat-screen-status" id="chatScreenStatus"></div>
+        <div class="chat-screen-name" id="chatScreenName">Комната</div>
+        <div class="chat-screen-status" id="chatScreenStatus">Подключение...</div>
       </div>
       <div class="chat-screen-actions">
         <button class="icon-btn" id="chatVoiceBtn" title="Голосовой звонок">
@@ -156,69 +65,6 @@
       </div>
     </div>
     <input type="file" id="chatFileInput" style="display:none">
-  </div>
-
-  <!-- PROFILE -->
-  <div id="profile" class="screen">
-    <div class="screen-header">
-      <button class="icon-btn" id="backFromProfileBtn">
-        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-      <span class="screen-title">Профиль</span>
-    </div>
-    <div class="screen-body">
-      <div class="avatar-section" id="avatarSection">
-        <div class="avatar-large" id="profileAvatar">
-          <svg viewBox="0 0 24 24" width="40" height="40"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 22c0-6 4-10 8-10s8 4 8 10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        </div>
-        <button class="btn ghost small" id="changeAvatarBtn">Сменить аватар</button>
-      </div>
-      <div class="profile-field">
-        <label>Username</label>
-        <div class="profile-value" id="profileUsername">@user</div>
-      </div>
-      <div class="profile-field">
-        <label>Отображаемое имя</label>
-        <div class="profile-edit-row">
-          <input type="text" id="profileDisplayName" maxlength="30">
-          <button class="btn primary small" id="saveDisplayNameBtn">Сохранить</button>
-        </div>
-      </div>
-      <div class="profile-field">
-        <label>Ключ шифрования</label>
-        <div class="profile-edit-row">
-          <button class="btn ghost small" id="showKeyBtn">Показать ключ</button>
-        </div>
-      </div>
-      <div class="profile-field">
-        <label>Сменить пароль</label>
-        <input type="password" id="newPassword" placeholder="Новый пароль" autocomplete="new-password">
-        <button class="btn primary small" id="changePasswordBtn">Изменить пароль</button>
-      </div>
-      <button class="btn secondary danger" id="logoutBtn">Выйти</button>
-    </div>
-    <input type="file" id="avatarFileInput" accept="image/*" style="display:none">
-  </div>
-
-  <!-- CREATE GROUP -->
-  <div id="createGroup" class="screen">
-    <div class="screen-header">
-      <button class="icon-btn" id="backFromGroupBtn">
-        <svg viewBox="0 0 24 24" width="24" height="24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      </button>
-      <span class="screen-title">Создать группу</span>
-    </div>
-    <div class="screen-body">
-      <div class="input-wrap">
-        <input type="text" id="groupName" placeholder="Название группы" maxlength="50">
-      </div>
-      <div class="input-wrap">
-        <input type="text" id="groupSearchInput" placeholder="Добавить участников по username..." autocomplete="off">
-      </div>
-      <div class="selected-members" id="selectedMembers"></div>
-      <div class="search-results" id="groupSearchResults"></div>
-      <button class="btn primary" id="createGroupBtn2">Создать группу</button>
-    </div>
   </div>
 
   <!-- CALL OVERLAY -->
@@ -250,7 +96,7 @@
 
 </div>
 
-<script src="app.js?v=3"></script>
+<script src="app.js?v=5"></script>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </body>
 </html>
